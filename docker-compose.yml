@@ -1,0 +1,16 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: ciae_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ciae_user
+      POSTGRES_PASSWORD: ciae_pass
+      POSTGRES_DB: ciae_db
+    ports:
+      - '5432:5432'
+    volumes:
+      - ciae_pgdata:/var/lib/postgresql/data
+
+volumes:
+  ciae_pgdata:
