@@ -1,6 +1,8 @@
 import io
+from datetime import date
 from typing import List, Optional
 from urllib.parse import urlparse
+from dateutil.relativedelta import relativedelta
 
 import qrcode
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -109,6 +111,17 @@ def crear_certificado(
 
     payload = datos.model_dump()
     payload["folio_manual"] = payload["folio_manual"].strip()
+
+    # Manejar fecha de emisión
+    fecha_emision = payload.get("fecha_emision")
+    if not fecha_emision:
+        fecha_emision = date.today()
+        payload["fecha_emision"] = fecha_emision
+
+    # Calcular vigencia si no se especifica y el curso la requiere
+    if payload.get("tiene_vigencia") and not payload.get("fecha_vigencia"):
+        meses = curso.meses_vigencia or 12
+        payload["fecha_vigencia"] = fecha_emision + relativedelta(months=meses)
 
     cert = Certificado(**payload, creado_por_id=current_user.id)
     db.add(cert)
