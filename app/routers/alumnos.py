@@ -3,9 +3,14 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import Alumno
-from app.schemas import AlumnoCreate, AlumnoOut, AlumnoUpdate
-from app.security import get_current_user
+from app.models import Alumno, Usuario
+from app.schemas import (
+    AlumnoCreate,
+    AlumnoOut,
+    AlumnoUpdate,
+    AlumnoToggleEstadoRequest,
+)
+from app.security import get_current_user, verify_password
 
 router = APIRouter(
     prefix="/api/alumnos",
@@ -23,7 +28,9 @@ def listar_alumnos(db: Session = Depends(get_db)):
 def obtener_alumno(alumno_id: int, db: Session = Depends(get_db)):
     alumno = db.query(Alumno).filter(Alumno.id == alumno_id).first()
     if not alumno:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Alumno no encontrado")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Alumno no encontrado"
+        )
     return alumno
 
 
@@ -45,10 +52,14 @@ def crear_alumno(datos: AlumnoCreate, db: Session = Depends(get_db)):
 
 
 @router.patch("/{alumno_id}", response_model=AlumnoOut)
-def actualizar_alumno(alumno_id: int, datos: AlumnoUpdate, db: Session = Depends(get_db)):
+def actualizar_alumno(
+    alumno_id: int, datos: AlumnoUpdate, db: Session = Depends(get_db)
+):
     alumno = db.query(Alumno).filter(Alumno.id == alumno_id).first()
     if not alumno:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Alumno no encontrado")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Alumno no encontrado"
+        )
 
     update_dict = datos.model_dump(exclude_unset=True)
     if "curp" in update_dict:
@@ -71,10 +82,38 @@ def actualizar_alumno(alumno_id: int, datos: AlumnoUpdate, db: Session = Depends
     return alumno
 
 
+@router.patch("/{alumno_id}/estado", response_model=AlumnoOut)
+def cambiar_estado_alumno(
+    alumno_id: int,
+    payload: AlumnoToggleEstadoRequest,
+    current_admin: Usuario = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    # Validar la contraseña del administrador actual
+    if not verify_password(payload.admin_password, current_admin.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Contraseña de administrador incorrecta",
+        )
+
+    alumno = db.query(Alumno).filter(Alumno.id == alumno_id).first()
+    if not alumno:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Alumno no encontrado"
+        )
+
+    alumno.activo = payload.activo
+    db.commit()
+    db.refresh(alumno)
+    return alumno
+
+
 @router.delete("/{alumno_id}", status_code=status.HTTP_204_NO_CONTENT)
 def eliminar_alumno(alumno_id: int, db: Session = Depends(get_db)):
     alumno = db.query(Alumno).filter(Alumno.id == alumno_id).first()
     if not alumno:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Alumno no encontrado")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Alumno no encontrado"
+        )
     db.delete(alumno)
     db.commit()

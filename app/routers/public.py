@@ -12,15 +12,29 @@ router = APIRouter(prefix="/api/public", tags=["público"])
 def _construir_respuesta_validacion(cert: Certificado) -> ValidacionPublicaResponse:
     hoy = date.today()
     sigue_vigente = True
+    motivo = None
+    documento_valido = True
 
-    if cert.tiene_vigencia and cert.fecha_vigencia:
-        sigue_vigente = hoy <= cert.fecha_vigencia
-
-    if cert.estatus != "vigente":
+    # 1. Comprobación crítica: ¿El alumno fue dado de baja?
+    alumno_activo = cert.alumno.activo if cert.alumno else True
+    if not alumno_activo:
+        documento_valido = False
         sigue_vigente = False
+        motivo = "ALUMNO_DADO_DE_BAJA"
+
+    # 2. Comprobación de estatus del certificado
+    elif cert.estatus != "vigente":
+        documento_valido = False
+        sigue_vigente = False
+        motivo = "CERTIFICADO_REVOCADO"
+
+    # 3. Comprobación de vigencia en fechas
+    elif cert.tiene_vigencia and cert.fecha_vigencia and hoy > cert.fecha_vigencia:
+        sigue_vigente = False
+        motivo = "CERTIFICADO_VENCIDO"
 
     return ValidacionPublicaResponse(
-        valido=True,
+        valido=documento_valido,
         folio=cert.folio_manual,
         alumno_nombre=cert.alumno_nombre,
         curso_nombre=cert.curso.nombre if cert.curso else "N/A",
@@ -31,6 +45,8 @@ def _construir_respuesta_validacion(cert: Certificado) -> ValidacionPublicaRespo
         vigente=sigue_vigente,
         instructor=cert.instructor,
         estatus=cert.estatus,
+        alumno_activo=alumno_activo,
+        motivo_invalidez=motivo,
     )
 
 

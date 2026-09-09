@@ -50,6 +50,7 @@ class Alumno(Base):
     curp = Column(String(18), unique=True, index=True, nullable=False)
     email = Column(String(100), nullable=True)
     telefono = Column(String(20), nullable=True)
+    activo = Column(Boolean, default=True, nullable=False)
     creado_en = Column(DateTime, default=datetime.utcnow)
 
     certificados = relationship("Certificado", back_populates="alumno")

@@ -75,6 +75,7 @@ class AlumnoBase(BaseModel):
     curp: str = Field(..., min_length=18, max_length=18)
     email: Optional[EmailStr] = None
     telefono: Optional[str] = None
+    activo: bool = True
 
 
 class AlumnoCreate(AlumnoBase):
@@ -87,6 +88,12 @@ class AlumnoUpdate(BaseModel):
     curp: Optional[str] = None
     email: Optional[EmailStr] = None
     telefono: Optional[str] = None
+    activo: Optional[bool] = None
+
+
+class AlumnoToggleEstadoRequest(BaseModel):
+    activo: bool
+    admin_password: str
 
 
 class AlumnoOut(AlumnoBase):
@@ -111,13 +118,14 @@ class CertificadoCreate(BaseModel):
 
 class CertificadoUpdate(BaseModel):
     folio_manual: Optional[str] = None
+    curso_id: Optional[int] = None      # <--- Permitir cambiar el curso
+    alumno_id: Optional[int] = None     # <--- Permitir cambiar el alumno
     instructor: Optional[str] = None
     fecha_emision: Optional[date] = None
     tiene_vigencia: Optional[bool] = None
     fecha_vigencia: Optional[date] = None
     calificacion: Optional[str] = None
     estatus: Optional[str] = None
-
 
 class CertificadoUpdateEstatus(BaseModel):
     estatus: str
@@ -156,3 +164,5 @@ class ValidacionPublicaResponse(BaseModel):
     vigente: bool = True
     instructor: Optional[str] = None
     estatus: Optional[str] = None
+    alumno_activo: bool = True
+    motivo_invalidez: Optional[str] = None
