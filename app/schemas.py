@@ -1,17 +1,23 @@
 from datetime import date, datetime
 from typing import Optional
-from pydantic import BaseModel, EmailStr, ConfigDict
-from app.models import EstatusCertificado
+from pydantic import BaseModel, EmailStr, Field
 
 
-# ---------------------------------------------------------------------------
-# AUTENTICACIÓN Y USUARIOS
-# ---------------------------------------------------------------------------
+# ===================== AUTENTICACIÓN =====================
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
 
 class LoginResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
-    nombre_completo: str
+    username: Optional[str] = ""
+    nombre_completo: Optional[str] = ""
+
+
+class TokenData(BaseModel):
+    username: Optional[str] = None
 
 
 class UsuarioBase(BaseModel):
@@ -29,21 +35,17 @@ class UsuarioOut(UsuarioBase):
     id: int
     creado_en: datetime
 
-    model_config = ConfigDict(from_attributes=True)
+    class Config:
+        from_attributes = True
 
 
-# ---------------------------------------------------------------------------
-# CURSOS
-# ---------------------------------------------------------------------------
-
+# ===================== CURSOS =====================
 class CursoBase(BaseModel):
-    nombre: str
-    descripcion: Optional[str] = None
+    nombre: str = Field(..., min_length=3, max_length=200)
+    duracion_horas: int = Field(..., gt=0)
     clave_curso: Optional[str] = None
-    duracion_horas: int
-    instructor: Optional[str] = None
-    fecha_inicio: Optional[date] = None
-    fecha_fin: Optional[date] = None
+    tiene_vigencia: bool = False
+    meses_vigencia: Optional[int] = None
 
 
 class CursoCreate(CursoBase):
@@ -52,29 +54,25 @@ class CursoCreate(CursoBase):
 
 class CursoUpdate(BaseModel):
     nombre: Optional[str] = None
-    descripcion: Optional[str] = None
-    clave_curso: Optional[str] = None
     duracion_horas: Optional[int] = None
-    instructor: Optional[str] = None
-    fecha_inicio: Optional[date] = None
-    fecha_fin: Optional[date] = None
+    clave_curso: Optional[str] = None
+    tiene_vigencia: Optional[bool] = None
+    meses_vigencia: Optional[int] = None
 
 
 class CursoOut(CursoBase):
     id: int
     creado_en: datetime
 
-    model_config = ConfigDict(from_attributes=True)
+    class Config:
+        from_attributes = True
 
 
-# ---------------------------------------------------------------------------
-# ALUMNOS
-# ---------------------------------------------------------------------------
-
+# ===================== ALUMNOS =====================
 class AlumnoBase(BaseModel):
-    nombre: str
-    apellidos: str
-    curp: str
+    nombre: str = Field(..., min_length=2, max_length=100)
+    apellidos: str = Field(..., min_length=2, max_length=100)
+    curp: str = Field(..., min_length=18, max_length=18)
     email: Optional[EmailStr] = None
     telefono: Optional[str] = None
 
@@ -93,55 +91,68 @@ class AlumnoUpdate(BaseModel):
 
 class AlumnoOut(AlumnoBase):
     id: int
-    nombre_completo: str
     creado_en: datetime
 
-    model_config = ConfigDict(from_attributes=True)
+    class Config:
+        from_attributes = True
 
 
-# ---------------------------------------------------------------------------
-# CERTIFICADOS
-# ---------------------------------------------------------------------------
-
+# ===================== CERTIFICADOS =====================
 class CertificadoCreate(BaseModel):
-    alumno_id: int
+    folio_manual: str = Field(..., min_length=3, max_length=50)
     curso_id: int
+    alumno_id: int
     fecha_emision: Optional[date] = None
+    tiene_vigencia: bool = False
+    fecha_vigencia: Optional[date] = None
+    instructor: str = Field(..., min_length=3, max_length=150)
+    calificacion: Optional[str] = "100"
+
+
+class CertificadoUpdate(BaseModel):
+    folio_manual: Optional[str] = None
+    instructor: Optional[str] = None
+    fecha_emision: Optional[date] = None
+    tiene_vigencia: Optional[bool] = None
     fecha_vigencia: Optional[date] = None
     calificacion: Optional[str] = None
-    folio_impreso: Optional[str] = None
+    estatus: Optional[str] = None
 
 
 class CertificadoUpdateEstatus(BaseModel):
-    estatus: EstatusCertificado
+    estatus: str
 
 
 class CertificadoOut(BaseModel):
     id: int
+    folio_manual: str
     token_publico: str
-    alumno_id: int
     curso_id: int
+    alumno_id: int
     alumno_nombre: str
-    estatus: EstatusCertificado
+    curso_nombre: str
     fecha_emision: date
-    fecha_vigencia: Optional[date] = None
-    calificacion: Optional[str] = None
-    folio_impreso: Optional[str] = None
+    tiene_vigencia: bool
+    fecha_vigencia: Optional[date]
+    instructor: str
+    calificacion: Optional[str]
+    estatus: str
     creado_en: datetime
 
-    model_config = ConfigDict(from_attributes=True)
+    class Config:
+        from_attributes = True
 
 
-# ---------------------------------------------------------------------------
-# VALIDACIÓN PÚBLICA (QR)
-# ---------------------------------------------------------------------------
-
-class ValidacionPublicaOut(BaseModel):
+# ===================== RESPUESTA PÚBLICA =====================
+class ValidacionPublicaResponse(BaseModel):
     valido: bool
-    estatus: Optional[str] = None
-    mensaje: Optional[str] = None
+    folio: Optional[str] = None
     alumno_nombre: Optional[str] = None
     curso_nombre: Optional[str] = None
     duracion_horas: Optional[int] = None
     fecha_emision: Optional[date] = None
+    tiene_vigencia: bool = False
     fecha_vigencia: Optional[date] = None
+    vigente: bool = True
+    instructor: Optional[str] = None
+    estatus: Optional[str] = None
