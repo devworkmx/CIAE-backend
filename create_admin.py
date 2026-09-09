@@ -1,58 +1,70 @@
-"""
-Script para crear el primer usuario administrador.
-Uso:
-    python create_admin.py
-"""
 import getpass
 import sys
-from app.database import SessionLocal, Base, engine
+from sqlalchemy.orm import Session
+
+from app.database import Base, engine, get_db
 from app.models import Usuario
 from app.security import hash_password
 
-# Crea las tablas si no existen aún en PostgreSQL
-Base.metadata.create_all(bind=engine)
-
 
 def main():
-    db = SessionLocal()
+    print("=== Creación de Usuario Administrador ===")
+
+    # Asegura que las tablas existan en PostgreSQL
+    Base.metadata.create_all(bind=engine)
+
+    db: Session = next(get_db())
+
     try:
         username = input("Username: ").strip()
-        email = input("Email: ").strip()
-        nombre_completo = input("Nombre completo: ").strip()
+        if not username:
+            print("El username es obligatorio.")
+            sys.exit(1)
 
-        if not username or not email or not nombre_completo:
-            print("Error: El usuario, email y nombre completo no pueden estar vacíos.")
-            return
+        email = input("Email: ").strip()
+        if not email:
+            print("El email es obligatorio.")
+            sys.exit(1)
+
+        nombre_completo = input("Nombre completo: ").strip()
+        if not nombre_completo:
+            print("El nombre completo es obligatorio.")
+            sys.exit(1)
+
+        # Verificar si ya existe
+        existente = (
+            db.query(Usuario)
+            .filter((Usuario.username == username) | (Usuario.email == email))
+            .first()
+        )
+        if existente:
+            print(f"Error: Ya existe un usuario con username '{username}' o email '{email}'.")
+            sys.exit(1)
 
         password = getpass.getpass("Password: ")
-        password_confirm = getpass.getpass("Confirmar password: ")
+        confirmar = getpass.getpass("Confirmar password: ")
 
-        if not password:
-            print("Error: La contraseña no puede estar vacía.")
-            return
+        if password != confirmar:
+            print("Las contraseñas no coinciden.")
+            sys.exit(1)
 
-        if password != password_confirm:
-            print("Error: Las contraseñas no coinciden.")
-            return
+        if len(password) < 6:
+            print("La contraseña debe tener al menos 6 caracteres.")
+            sys.exit(1)
 
-        # Validar duplicados tanto en username como en email
-        if db.query(Usuario).filter(Usuario.username == username).first():
-            print(f"Error: El username '{username}' ya está registrado.")
-            return
-
-        if db.query(Usuario).filter(Usuario.email == email).first():
-            print(f"Error: El correo '{email}' ya está registrado.")
-            return
-
-        usuario = Usuario(
+        # Instanciar pasando 'password_hash' tal como está definido en app/models.py
+        admin = Usuario(
             username=username,
             email=email,
             nombre_completo=nombre_completo,
-            hashed_password=hash_password(password),
+            password_hash=hash_password(password),
             activo=True,
         )
-        db.add(usuario)
+
+        db.add(admin)
         db.commit()
+        db.refresh(admin)
+
         print(f"\n¡Éxito! Usuario admin '{username}' creado correctamente.")
 
     except Exception as e:

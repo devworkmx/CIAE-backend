@@ -1,15 +1,21 @@
 import io
 from typing import List, Optional
+from urllib.parse import urlparse
 
 import qrcode
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session, joinedload
 
 from app.config import settings
 from app.database import get_db
 from app.models import Alumno, Certificado, Curso, Usuario
-from app.schemas import CertificadoCreate, CertificadoOut, CertificadoUpdateEstatus
+from app.schemas import (
+    CertificadoCreate,
+    CertificadoOut,
+    CertificadoUpdate,
+    CertificadoUpdateEstatus,
+)
 from app.security import get_current_user
 
 router = APIRouter(
@@ -19,10 +25,18 @@ router = APIRouter(
 )
 
 
-def _url_validacion(token: str) -> str:
-    # Ej: http://localhost:5173/validar/AbC123...
-    # El QR siempre apunta al token aleatorio, nunca a un ID consecutivo[cite: 2]
-    return f"{settings.FRONTEND_VALIDATION_URL.rstrip('/')}/{token}"
+def _obtener_url_qr(request: Request, token: str) -> str:
+    base_url = getattr(
+        settings, "FRONTEND_VALIDATION_URL", "http://localhost:5173/validar"
+    )
+
+    origin = request.headers.get("origin") or request.headers.get("referer")
+    if origin:
+        parsed = urlparse(origin)
+        base = f"{parsed.scheme}://{parsed.netloc}"
+        return f"{base}/validar/{token}"
+
+    return f"{base_url.rstrip('/')}/{token}"
 
 
 @router.get("", response_model=List[CertificadoOut])
@@ -31,13 +45,14 @@ def listar_certificados(
     alumno_id: Optional[int] = None,
     db: Session = Depends(get_db),
 ):
-    query = db.query(Certificado).options(joinedload(Certificado.alumno))
-
+    query = db.query(Certificado).options(
+        joinedload(Certificado.alumno),
+        joinedload(Certificado.curso),
+    )
     if curso_id is not None:
         query = query.filter(Certificado.curso_id == curso_id)
     if alumno_id is not None:
         query = query.filter(Certificado.alumno_id == alumno_id)
-
     return query.order_by(Certificado.creado_en.desc()).all()
 
 
@@ -45,14 +60,17 @@ def listar_certificados(
 def obtener_certificado(certificado_id: int, db: Session = Depends(get_db)):
     cert = (
         db.query(Certificado)
-        .options(joinedload(Certificado.alumno))
+        .options(
+            joinedload(Certificado.alumno),
+            joinedload(Certificado.curso),
+        )
         .filter(Certificado.id == certificado_id)
         .first()
     )
     if not cert:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Certificado no encontrado"
+            detail="Certificado no encontrado",
         )
     return cert
 
@@ -63,25 +81,82 @@ def crear_certificado(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
-    # 1. Verificar que el curso exista
+    # Validar duplicidad de folio manual
+    folio_existente = (
+        db.query(Certificado)
+        .filter(Certificado.folio_manual.ilike(datos.folio_manual.strip()))
+        .first()
+    )
+    if folio_existente:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El folio manual asignado ya existe. Por favor ingrese un folio único.",
+        )
+
     curso = db.query(Curso).filter(Curso.id == datos.curso_id).first()
     if not curso:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="El curso especificado no existe"
+            detail="El curso especificado no existe",
         )
 
-    # 2. Verificar que el alumno exista
     alumno = db.query(Alumno).filter(Alumno.id == datos.alumno_id).first()
     if not alumno:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="El alumno especificado no existe"
+            detail="El alumno especificado no existe",
         )
 
-    # 3. Crear el certificado enlazado (el token_publico se genera solo en el modelo)
-    cert = Certificado(**datos.model_dump(), creado_por_id=current_user.id)
+    payload = datos.model_dump()
+    payload["folio_manual"] = payload["folio_manual"].strip()
+
+    cert = Certificado(**payload, creado_por_id=current_user.id)
     db.add(cert)
+    db.commit()
+    db.refresh(cert)
+    return cert
+
+
+@router.patch("/{certificado_id}", response_model=CertificadoOut)
+def actualizar_certificado(
+    certificado_id: int,
+    datos: CertificadoUpdate,
+    db: Session = Depends(get_db),
+):
+    cert = (
+        db.query(Certificado)
+        .options(joinedload(Certificado.alumno), joinedload(Certificado.curso))
+        .filter(Certificado.id == certificado_id)
+        .first()
+    )
+    if not cert:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Certificado no encontrado",
+        )
+
+    update_dict = datos.model_dump(exclude_unset=True)
+
+    if "folio_manual" in update_dict:
+        folio_limpio = update_dict["folio_manual"].strip()
+        duplicado = (
+            db.query(Certificado)
+            .filter(
+                Certificado.folio_manual.ilike(folio_limpio),
+                Certificado.id != certificado_id,
+            )
+            .first()
+        )
+        if duplicado:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="El folio manual asignado ya está en uso por otro certificado",
+            )
+        update_dict["folio_manual"] = folio_limpio
+
+    for key, value in update_dict.items():
+        setattr(cert, key, value)
+
     db.commit()
     db.refresh(cert)
     return cert
@@ -91,18 +166,18 @@ def crear_certificado(
 def cambiar_estatus(
     certificado_id: int,
     datos: CertificadoUpdateEstatus,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     cert = (
         db.query(Certificado)
-        .options(joinedload(Certificado.alumno))
+        .options(joinedload(Certificado.alumno), joinedload(Certificado.curso))
         .filter(Certificado.id == certificado_id)
         .first()
     )
     if not cert:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Certificado no encontrado"
+            detail="Certificado no encontrado",
         )
 
     cert.estatus = datos.estatus
@@ -117,18 +192,19 @@ def eliminar_certificado(certificado_id: int, db: Session = Depends(get_db)):
     if not cert:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Certificado no encontrado"
+            detail="Certificado no encontrado",
         )
     db.delete(cert)
     db.commit()
 
 
 @router.get("/{certificado_id}/qr")
-def descargar_qr(certificado_id: int, db: Session = Depends(get_db)):
-    """
-    Genera el PNG del QR en memoria (sin almacenar imágenes en disco ni nube)[cite: 2].
-    Codifica la URL pública construida con el token_publico[cite: 2].
-    """
+def descargar_qr(
+    certificado_id: int,
+    request: Request,
+    base_url: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
     cert = (
         db.query(Certificado)
         .options(joinedload(Certificado.alumno))
@@ -138,17 +214,24 @@ def descargar_qr(certificado_id: int, db: Session = Depends(get_db)):
     if not cert:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Certificado no encontrado"
+            detail="Certificado no encontrado",
         )
 
-    url = _url_validacion(cert.token_publico)
+    if base_url:
+        url = f"{base_url.rstrip('/')}/validar/{cert.token_publico}"
+    else:
+        url = _obtener_url_qr(request, cert.token_publico)
 
     img = qrcode.make(url, box_size=10, border=2)
     buffer = io.BytesIO()
     img.save(buffer, format="PNG")
     buffer.seek(0)
 
-    nombre_limpio = cert.alumno_nombre.replace(" ", "_") if cert.alumno_nombre else f"cert_{cert.id}"
+    nombre_limpio = (
+        cert.alumno_nombre.strip().replace(" ", "_")
+        if cert.alumno_nombre
+        else f"cert_{cert.id}"
+    )
     filename = f"qr_{nombre_limpio}.png"
 
     return StreamingResponse(
