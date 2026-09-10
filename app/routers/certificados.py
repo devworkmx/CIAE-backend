@@ -5,7 +5,7 @@ from urllib.parse import urlparse
 from dateutil.relativedelta import relativedelta
 
 import qrcode
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session, joinedload
 
@@ -19,6 +19,7 @@ from app.schemas import (
     CertificadoUpdateEstatus,
 )
 from app.security import get_current_user
+from app.services.email import enviar_correo_certificado
 
 router = APIRouter(
     prefix="/api/certificados",
@@ -80,6 +81,7 @@ def obtener_certificado(certificado_id: int, db: Session = Depends(get_db)):
 @router.post("", response_model=CertificadoOut, status_code=status.HTTP_201_CREATED)
 def crear_certificado(
     datos: CertificadoCreate,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
@@ -127,6 +129,21 @@ def crear_certificado(
     db.add(cert)
     db.commit()
     db.refresh(cert)
+
+    # Disparar correo en segundo plano si el alumno cuenta con email registrado
+    if alumno.email:
+        background_tasks.add_task(
+            enviar_correo_certificado,
+            destinatario=alumno.email,
+            alumno_nombre=f"{alumno.nombre} {alumno.apellidos}",
+            curso_nombre=curso.nombre,
+            folio=cert.folio_manual,
+            token_publico=cert.token_publico,
+            instructor=cert.instructor,
+            tiene_vigencia=cert.tiene_vigencia,
+            fecha_vigencia=str(cert.fecha_vigencia) if cert.fecha_vigencia else None,
+        )
+
     return cert
 
 
