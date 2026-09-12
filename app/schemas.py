@@ -1,5 +1,5 @@
 from datetime import date, datetime
-from typing import Optional
+from typing import List, Optional
 from pydantic import BaseModel, EmailStr, Field
 
 
@@ -118,14 +118,15 @@ class CertificadoCreate(BaseModel):
 
 class CertificadoUpdate(BaseModel):
     folio_manual: Optional[str] = None
-    curso_id: Optional[int] = None      # <--- Permitir cambiar el curso
-    alumno_id: Optional[int] = None     # <--- Permitir cambiar el alumno
+    curso_id: Optional[int] = None
+    alumno_id: Optional[int] = None
     instructor: Optional[str] = None
     fecha_emision: Optional[date] = None
     tiene_vigencia: Optional[bool] = None
     fecha_vigencia: Optional[date] = None
     calificacion: Optional[str] = None
     estatus: Optional[str] = None
+
 
 class CertificadoUpdateEstatus(BaseModel):
     estatus: str
@@ -166,3 +167,19 @@ class ValidacionPublicaResponse(BaseModel):
     estatus: Optional[str] = None
     alumno_activo: bool = True
     motivo_invalidez: Optional[str] = None
+    token_publico: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class AlumnoPublicoResumen(BaseModel):
+    nombre: str
+    curp: str
+    activo: bool
+
+
+class BusquedaPublicaResponse(BaseModel):
+    tipo_consulta: str
+    alumno: Optional[AlumnoPublicoResumen] = None
+    certificados: List[ValidacionPublicaResponse]
