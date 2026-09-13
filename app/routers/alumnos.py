@@ -10,7 +10,7 @@ from app.schemas import (
     AlumnoUpdate,
     AlumnoToggleEstadoRequest,
 )
-from app.security import get_current_user, verify_password
+from app.security import get_current_user, require_admin, verify_password
 
 router = APIRouter(
     prefix="/api/alumnos",
@@ -86,7 +86,7 @@ def actualizar_alumno(
 def cambiar_estado_alumno(
     alumno_id: int,
     payload: AlumnoToggleEstadoRequest,
-    current_admin: Usuario = Depends(get_current_user),
+    current_admin: Usuario = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     # Validar la contraseña del administrador actual
@@ -109,7 +109,11 @@ def cambiar_estado_alumno(
 
 
 @router.delete("/{alumno_id}", status_code=status.HTTP_204_NO_CONTENT)
-def eliminar_alumno(alumno_id: int, db: Session = Depends(get_db)):
+def eliminar_alumno(
+    alumno_id: int,
+    db: Session = Depends(get_db),
+    _admin: Usuario = Depends(require_admin),
+):
     alumno = db.query(Alumno).filter(Alumno.id == alumno_id).first()
     if not alumno:
         raise HTTPException(

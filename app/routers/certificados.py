@@ -18,7 +18,7 @@ from app.schemas import (
     CertificadoUpdate,
     CertificadoUpdateEstatus,
 )
-from app.security import get_current_user
+from app.security import get_current_user, require_admin
 from app.services.email import enviar_correo_certificado
 
 router = APIRouter(
@@ -29,6 +29,20 @@ router = APIRouter(
 
 
 def _obtener_url_qr(request: Request, token: str) -> str:
+    """
+    Construye la URL de validación embebida en el QR.
+
+    IMPORTANTE (seguridad): esta URL nunca debe poder ser controlada por
+    quien hace la petición. Un QR que apunte a un dominio arbitrario es un
+    vector de phishing (parece un certificado oficial pero lleva a un sitio
+    malicioso). Por eso:
+      - No se acepta ningún parámetro de la petición (como un antiguo
+        `base_url`) para decidir el dominio de destino.
+      - El encabezado Origin/Referer solo se usa si coincide EXACTAMENTE
+        con uno de los orígenes permitidos en settings.cors_origins.
+      - En cualquier otro caso, se usa siempre el FRONTEND_VALIDATION_URL
+        configurado de forma fija en el servidor.
+    """
     base_url = getattr(
         settings, "FRONTEND_VALIDATION_URL", "http://localhost:5173/validar"
     )
@@ -36,8 +50,9 @@ def _obtener_url_qr(request: Request, token: str) -> str:
     origin = request.headers.get("origin") or request.headers.get("referer")
     if origin:
         parsed = urlparse(origin)
-        base = f"{parsed.scheme}://{parsed.netloc}"
-        return f"{base}/validar/{token}"
+        origen_normalizado = f"{parsed.scheme}://{parsed.netloc}"
+        if origen_normalizado in settings.cors_origins:
+            return f"{origen_normalizado}/validar/{token}"
 
     return f"{base_url.rstrip('/')}/{token}"
 
@@ -197,6 +212,7 @@ def cambiar_estatus(
     certificado_id: int,
     datos: CertificadoUpdateEstatus,
     db: Session = Depends(get_db),
+    _admin: Usuario = Depends(require_admin),
 ):
     cert = (
         db.query(Certificado)
@@ -217,7 +233,11 @@ def cambiar_estatus(
 
 
 @router.delete("/{certificado_id}", status_code=status.HTTP_204_NO_CONTENT)
-def eliminar_certificado(certificado_id: int, db: Session = Depends(get_db)):
+def eliminar_certificado(
+    certificado_id: int,
+    db: Session = Depends(get_db),
+    _admin: Usuario = Depends(require_admin),
+):
     cert = db.query(Certificado).filter(Certificado.id == certificado_id).first()
     if not cert:
         raise HTTPException(
@@ -232,7 +252,6 @@ def eliminar_certificado(certificado_id: int, db: Session = Depends(get_db)):
 def descargar_qr(
     certificado_id: int,
     request: Request,
-    base_url: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
     cert = (
@@ -247,10 +266,7 @@ def descargar_qr(
             detail="Certificado no encontrado",
         )
 
-    if base_url:
-        url = f"{base_url.rstrip('/')}/validar/{cert.token_publico}"
-    else:
-        url = _obtener_url_qr(request, cert.token_publico)
+    url = _obtener_url_qr(request, cert.token_publico)
 
     img = qrcode.make(url, box_size=10, border=2)
     buffer = io.BytesIO()

@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import Curso
 from app.schemas import CursoCreate, CursoOut, CursoUpdate
-from app.security import get_current_user
+from app.security import get_current_user, require_admin
 
 router = APIRouter(
     prefix="/api/cursos",
@@ -49,7 +49,11 @@ def actualizar_curso(curso_id: int, datos: CursoUpdate, db: Session = Depends(ge
 
 
 @router.delete("/{curso_id}", status_code=status.HTTP_204_NO_CONTENT)
-def eliminar_curso(curso_id: int, db: Session = Depends(get_db)):
+def eliminar_curso(
+    curso_id: int,
+    db: Session = Depends(get_db),
+    _admin=Depends(require_admin),
+):
     curso = db.query(Curso).filter(Curso.id == curso_id).first()
     if not curso:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Curso no encontrado")

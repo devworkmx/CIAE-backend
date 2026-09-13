@@ -1,10 +1,11 @@
 from datetime import date
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session, joinedload
 
 from app.database import get_db
 from app.models import Alumno, Certificado
+from app.rate_limit import limiter
 from app.schemas import (
     AlumnoPublicoResumen,
     BusquedaPublicaResponse,
@@ -62,7 +63,10 @@ def _construir_respuesta_validacion(cert: Certificado) -> ValidacionPublicaRespo
 
 
 @router.get("/validar/{token}", response_model=ValidacionPublicaResponse)
-def validar_certificado_publico(token: str, db: Session = Depends(get_db)):
+@limiter.limit("30/minute")
+def validar_certificado_publico(
+    request: Request, token: str, db: Session = Depends(get_db)
+):
     cert = (
         db.query(Certificado)
         .options(
@@ -83,7 +87,9 @@ def validar_certificado_publico(token: str, db: Session = Depends(get_db)):
 
 
 @router.get("/buscar", response_model=BusquedaPublicaResponse)
+@limiter.limit("10/minute")
 def buscar_certificado_manual(
+    request: Request,
     tipo: str = Query(..., regex="^(folio|curp)$", description="Tipo: folio o curp"),
     valor: str = Query(..., min_length=1, description="Folio manual o CURP"),
     db: Session = Depends(get_db),

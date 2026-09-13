@@ -9,14 +9,19 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 480
 
     FRONTEND_VALIDATION_URL: str = "http://localhost:5173/validar"
+    # En producción, define ALLOWED_ORIGINS en el .env con el/los dominio(s)
+    # exactos del frontend, separados por comas si hay más de uno.
+    # Ejemplo: ALLOWED_ORIGINS=https://certificados.miempresa.com
     ALLOWED_ORIGINS: str = "http://localhost:5173"
 
     # Propiedades para CORS
     @property
     def cors_origins(self) -> List[str]:
-        # Divide por comas y limpia espacios, o usa wildcard en dev
+        # Divide por comas y limpia espacios. NUNCA usar "*" con
+        # allow_credentials=True: el navegador lo rechaza y además
+        # equivaldría a aceptar peticiones autenticadas desde cualquier sitio.
         if not self.ALLOWED_ORIGINS:
-            return ["*"]
+            return []
         return [origen.strip() for origen in self.ALLOWED_ORIGINS.split(",") if origen.strip()]
 
     # Compatibilidad con database.py y security.py

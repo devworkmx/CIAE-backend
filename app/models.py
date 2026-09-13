@@ -15,6 +15,12 @@ class Usuario(Base):
     password_hash = Column(String(255), nullable=False)
     nombre_completo = Column(String(150), nullable=False)
     activo = Column(Boolean, default=True)
+    # Rol del usuario: "admin" (acceso total, incluye eliminar registros)
+    # o "capturista" (alta/edición pero sin permisos destructivos).
+    # Se agrega con default="admin" para no romper cuentas ya existentes;
+    # si ya tienes usuarios en la base, revísalos y ajusta el rol manualmente
+    # a "capturista" donde corresponda.
+    rol = Column(String(20), nullable=False, default="admin")
     creado_en = Column(DateTime, default=datetime.utcnow)
 
     # Alias de compatibilidad para evitar AttributeError

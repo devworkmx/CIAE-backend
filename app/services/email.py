@@ -1,3 +1,4 @@
+import html
 import resend
 from app.config import settings
 
@@ -20,9 +21,18 @@ def enviar_correo_certificado(
     # URL directa de validación con el token o la página general
     enlace_validacion = f"{settings.FRONTEND_URL.rstrip('/')}/validar/{token_publico}"
 
+    # Se escapan todos los valores que provienen de datos capturados por el
+    # administrador (nombre de alumno, curso, folio, instructor) para evitar
+    # que HTML/JS embebido en esos campos se inyecte en el correo enviado.
+    alumno_nombre = html.escape(alumno_nombre or "")
+    curso_nombre = html.escape(curso_nombre or "")
+    folio = html.escape(folio or "")
+    instructor = html.escape(instructor or "")
+    fecha_vigencia_segura = html.escape(fecha_vigencia) if fecha_vigencia else None
+
     texto_vigencia = (
-        f"Vigente hasta el: <strong>{fecha_vigencia}</strong>"
-        if tiene_vigencia and fecha_vigencia
+        f"Vigente hasta el: <strong>{fecha_vigencia_segura}</strong>"
+        if tiene_vigencia and fecha_vigencia_segura
         else "Vigencia: <strong>Permanente / Sin caducidad</strong>"
     )
 

@@ -1,6 +1,7 @@
 from datetime import date, datetime
 from typing import List, Optional
-from pydantic import BaseModel, EmailStr, Field
+import re
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 
 # ===================== AUTENTICACIÓN =====================
@@ -28,7 +29,18 @@ class UsuarioBase(BaseModel):
 
 
 class UsuarioCreate(UsuarioBase):
-    password: str
+    password: str = Field(..., min_length=10, max_length=128)
+
+    @field_validator("password")
+    @classmethod
+    def validar_complejidad_password(cls, valor: str) -> str:
+        if not re.search(r"[a-z]", valor):
+            raise ValueError("La contraseña debe incluir al menos una letra minúscula")
+        if not re.search(r"[A-Z]", valor):
+            raise ValueError("La contraseña debe incluir al menos una letra mayúscula")
+        if not re.search(r"\d", valor):
+            raise ValueError("La contraseña debe incluir al menos un número")
+        return valor
 
 
 class UsuarioOut(UsuarioBase):
