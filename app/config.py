@@ -58,5 +58,13 @@ class Settings(BaseSettings):
     RESEND_FROM_EMAIL: str = "onboarding@resend.dev"
     FRONTEND_URL: str = "http://localhost:5173"  # O el puerto donde corra tu React
 
+    # ---- Cookie de sesión (reemplaza el JWT en localStorage) ----
+    # COOKIE_SECURE debe ser True en producción (requiere HTTPS real).
+    # Solo se pone en False para desarrollo local si el backend corre
+    # sobre http:// puro sin certificado (no recomendado, solo pruebas).
+    COOKIE_SECURE: bool = True
+    COOKIE_SAMESITE: str = "lax"
+    COOKIE_NAME: str = "ciae_token"
+
 
 settings = Settings()

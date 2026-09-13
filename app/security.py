@@ -2,8 +2,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 import jwt
-from fastapi import Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer
+from fastapi import Cookie, Depends, HTTPException, status
 from passlib.context import CryptContext
 from sqlalchemy.orm import Session
 
@@ -13,9 +12,6 @@ from app.models import Usuario
 
 # Configuración de hashing con bcrypt
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
-# Endpoint para extracción del token Bearer en FastAPI
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 
 
 def hash_password(password: str) -> str:
@@ -62,21 +58,35 @@ def authenticate_user(db: Session, username_or_email: str, password: str) -> Opt
     if not hash_almacenado or not verify_password(password, hash_almacenado):
         return None
 
+    # La cuenta inactiva se trata igual que credenciales inválidas de cara al
+    # cliente: así la API nunca revela (a quien la llame directamente, sin
+    # pasar por el frontend) si una cuenta existe pero está desactivada.
+    if not user.activo:
+        return None
+
     return user
 
 
 def get_current_user(
-    token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)
+    ciae_token: Optional[str] = Cookie(default=None),
+    db: Session = Depends(get_db),
 ) -> Usuario:
+    """
+    Lee el JWT desde la cookie httpOnly 'ciae_token' (no desde el header
+    Authorization). El navegador la envía automáticamente en cada petición
+    al backend; JavaScript nunca puede leerla ni un XSS puede robarla.
+    """
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="No se pudieron validar las credenciales de acceso",
-        headers={"WWW-Authenticate": "Bearer"},
     )
+
+    if not ciae_token:
+        raise credentials_exception
 
     try:
         payload = jwt.decode(
-            token,
+            ciae_token,
             settings.SECRET_KEY,
             algorithms=[getattr(settings, "ALGORITHM", "HS256")],
         )

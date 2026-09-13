@@ -4,6 +4,26 @@ import re
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
 
+# Formato oficial de CURP: 4 letras + 6 dígitos (fecha) + H/M + 5 letras
+# (estado + consonantes internas) + 2 alfanuméricos + 1 dígito verificador.
+CURP_REGEX = re.compile(
+    r"^[A-Z][AEIOUX][A-Z]{2}\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])"
+    r"[HM](AS|BC|BS|CC|CS|CH|CL|CM|DF|DG|GT|GR|HG|JC|MC|MN|MS|NT|NL|OC|PL|"
+    r"QO|QR|SP|SL|SR|TC|TS|TL|VZ|YN|ZS|NE)[B-DF-HJ-NP-TV-Z]{3}[A-Z\d]\d$"
+)
+
+
+def validar_formato_curp(valor: str) -> str:
+    """Normaliza y valida el formato oficial de una CURP. Lanza ValueError si no cumple."""
+    valor_normalizado = valor.strip().upper()
+    if not CURP_REGEX.match(valor_normalizado):
+        raise ValueError(
+            "CURP inválida. Debe tener 18 caracteres con el formato oficial "
+            "(ej. PEGC900101HDFRNR09)."
+        )
+    return valor_normalizado
+
+
 # ===================== AUTENTICACIÓN =====================
 class LoginRequest(BaseModel):
     username: str
@@ -11,10 +31,20 @@ class LoginRequest(BaseModel):
 
 
 class LoginResponse(BaseModel):
-    access_token: str
-    token_type: str = "bearer"
+    # El JWT ya NO viaja en el cuerpo de la respuesta: el backend lo entrega
+    # como cookie httpOnly (ver /api/auth/login), así JavaScript nunca puede
+    # leerlo directamente. Aquí solo va información no sensible para la UI.
     username: Optional[str] = ""
     nombre_completo: Optional[str] = ""
+
+
+class UsuarioActualResponse(BaseModel):
+    username: str
+    nombre_completo: str
+    email: EmailStr
+
+    class Config:
+        from_attributes = True
 
 
 class TokenData(BaseModel):
@@ -82,6 +112,10 @@ class CursoOut(CursoBase):
 
 # ===================== ALUMNOS =====================
 class AlumnoBase(BaseModel):
+    # OJO: esta clase también es la base de AlumnoOut (lo que se LEE/lista).
+    # El validador de formato de CURP va solo en AlumnoCreate/AlumnoUpdate
+    # (lo que se ESCRIBE), para no romper la lectura de registros ya
+    # existentes que se hayan guardado antes de agregar esta validación.
     nombre: str = Field(..., min_length=2, max_length=100)
     apellidos: str = Field(..., min_length=2, max_length=100)
     curp: str = Field(..., min_length=18, max_length=18)
@@ -91,7 +125,10 @@ class AlumnoBase(BaseModel):
 
 
 class AlumnoCreate(AlumnoBase):
-    pass
+    @field_validator("curp")
+    @classmethod
+    def validar_curp(cls, valor: str) -> str:
+        return validar_formato_curp(valor)
 
 
 class AlumnoUpdate(BaseModel):
@@ -101,6 +138,13 @@ class AlumnoUpdate(BaseModel):
     email: Optional[EmailStr] = None
     telefono: Optional[str] = None
     activo: Optional[bool] = None
+
+    @field_validator("curp")
+    @classmethod
+    def validar_curp_opcional(cls, valor: Optional[str]) -> Optional[str]:
+        if valor is None:
+            return valor
+        return validar_formato_curp(valor)
 
 
 class AlumnoToggleEstadoRequest(BaseModel):

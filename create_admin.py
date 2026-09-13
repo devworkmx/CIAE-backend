@@ -1,10 +1,12 @@
 import getpass
 import sys
 from sqlalchemy.orm import Session
+from pydantic import ValidationError
 
 from app.database import Base, engine, get_db
 from app.models import Usuario
 from app.security import hash_password
+from app.schemas import UsuarioCreate
 
 
 def main():
@@ -48,8 +50,21 @@ def main():
             print("Las contraseñas no coinciden.")
             sys.exit(1)
 
-        if len(password) < 6:
-            print("La contraseña debe tener al menos 6 caracteres.")
+        # Reutiliza EXACTAMENTE la misma regla de complejidad que usa la API
+        # (UsuarioCreate en schemas.py): 10+ caracteres, mayúscula, minúscula y número.
+        # Así una cuenta de administrador nunca puede quedar más débil que
+        # cualquier cuenta creada normalmente desde el panel.
+        try:
+            UsuarioCreate(
+                username=username,
+                email=email,
+                nombre_completo=nombre_completo,
+                password=password,
+            )
+        except ValidationError as e:
+            print("\nLa contraseña o los datos no cumplen los requisitos:")
+            for error in e.errors():
+                print(f"  - {error['msg']}")
             sys.exit(1)
 
         # Instanciar pasando 'password_hash' tal como está definido en app/models.py
