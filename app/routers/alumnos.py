@@ -20,13 +20,29 @@ router = APIRouter(
 
 
 @router.get("", response_model=List[AlumnoOut])
-def listar_alumnos(db: Session = Depends(get_db)):
-    return db.query(Alumno).order_by(Alumno.apellidos.asc()).all()
+def listar_alumnos(
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    return (
+        db.query(Alumno)
+        .filter(Alumno.tenant_id == current_user.tenant_id)
+        .order_by(Alumno.apellidos.asc())
+        .all()
+    )
 
 
 @router.get("/{alumno_id}", response_model=AlumnoOut)
-def obtener_alumno(alumno_id: int, db: Session = Depends(get_db)):
-    alumno = db.query(Alumno).filter(Alumno.id == alumno_id).first()
+def obtener_alumno(
+    alumno_id: int,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    alumno = (
+        db.query(Alumno)
+        .filter(Alumno.id == alumno_id, Alumno.tenant_id == current_user.tenant_id)
+        .first()
+    )
     if not alumno:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Alumno no encontrado"
@@ -35,15 +51,28 @@ def obtener_alumno(alumno_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("", response_model=AlumnoOut, status_code=status.HTTP_201_CREATED)
-def crear_alumno(datos: AlumnoCreate, db: Session = Depends(get_db)):
-    existente = db.query(Alumno).filter(Alumno.curp == datos.curp.upper()).first()
+def crear_alumno(
+    datos: AlumnoCreate,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    existente = (
+        db.query(Alumno)
+        .filter(
+            Alumno.curp == datos.curp.upper(),
+            Alumno.tenant_id == current_user.tenant_id,
+        )
+        .first()
+    )
     if existente:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Ya existe un alumno registrado con esta CURP",
+            detail="Ya existe un alumno registrado con esta CURP en su institución",
         )
     payload = datos.model_dump()
     payload["curp"] = payload["curp"].upper()
+    payload["tenant_id"] = current_user.tenant_id
+
     alumno = Alumno(**payload)
     db.add(alumno)
     db.commit()
@@ -53,9 +82,16 @@ def crear_alumno(datos: AlumnoCreate, db: Session = Depends(get_db)):
 
 @router.patch("/{alumno_id}", response_model=AlumnoOut)
 def actualizar_alumno(
-    alumno_id: int, datos: AlumnoUpdate, db: Session = Depends(get_db)
+    alumno_id: int,
+    datos: AlumnoUpdate,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
 ):
-    alumno = db.query(Alumno).filter(Alumno.id == alumno_id).first()
+    alumno = (
+        db.query(Alumno)
+        .filter(Alumno.id == alumno_id, Alumno.tenant_id == current_user.tenant_id)
+        .first()
+    )
     if not alumno:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Alumno no encontrado"
@@ -66,13 +102,17 @@ def actualizar_alumno(
         update_dict["curp"] = update_dict["curp"].upper()
         conflicto = (
             db.query(Alumno)
-            .filter(Alumno.curp == update_dict["curp"], Alumno.id != alumno_id)
+            .filter(
+                Alumno.curp == update_dict["curp"],
+                Alumno.tenant_id == current_user.tenant_id,
+                Alumno.id != alumno_id,
+            )
             .first()
         )
         if conflicto:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="La CURP ingresada ya pertenece a otro alumno registrado",
+                detail="La CURP ingresada ya pertenece a otro alumno registrado en su institución",
             )
 
     for key, value in update_dict.items():
@@ -89,14 +129,17 @@ def cambiar_estado_alumno(
     current_admin: Usuario = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    # Validar la contraseña del administrador actual
     if not verify_password(payload.admin_password, current_admin.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Contraseña de administrador incorrecta",
         )
 
-    alumno = db.query(Alumno).filter(Alumno.id == alumno_id).first()
+    alumno = (
+        db.query(Alumno)
+        .filter(Alumno.id == alumno_id, Alumno.tenant_id == current_admin.tenant_id)
+        .first()
+    )
     if not alumno:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Alumno no encontrado"
@@ -112,9 +155,13 @@ def cambiar_estado_alumno(
 def eliminar_alumno(
     alumno_id: int,
     db: Session = Depends(get_db),
-    _admin: Usuario = Depends(require_admin),
+    current_admin: Usuario = Depends(require_admin),
 ):
-    alumno = db.query(Alumno).filter(Alumno.id == alumno_id).first()
+    alumno = (
+        db.query(Alumno)
+        .filter(Alumno.id == alumno_id, Alumno.tenant_id == current_admin.tenant_id)
+        .first()
+    )
     if not alumno:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Alumno no encontrado"
