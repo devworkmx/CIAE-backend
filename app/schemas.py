@@ -42,6 +42,13 @@ class UsuarioActualResponse(BaseModel):
     username: str
     nombre_completo: str
     email: EmailStr
+    # Se expone el rol para que el frontend pueda ocultar en la UI acciones
+    # exclusivas de administrador (ej. dar de baja alumnos, revocar
+    # certificados) cuando el usuario es "capturista". OJO: esto es solo
+    # una mejora de experiencia de usuario -- el control de acceso REAL
+    # sigue siendo require_admin en el backend (security.py). Nunca confiar
+    # en este campo del lado del cliente como mecanismo de seguridad.
+    rol: str
 
     class Config:
         from_attributes = True
