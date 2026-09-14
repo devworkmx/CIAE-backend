@@ -1,5 +1,7 @@
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from slowapi.errors import RateLimitExceeded
 from slowapi import _rate_limit_exceeded_handler
 
@@ -19,6 +21,33 @@ app = FastAPI(
 # Rate limiting global (usado explícitamente en /api/public y /api/auth/login)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# --- MANEJADOR GLOBAL DE ERRORES DE VALIDACIÓN (Pydantic) ---
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    errores_amigables = {}
+
+    for error in exc.errors():
+        # Obtiene el nombre del campo que falló (ej. 'nombre')
+        campo = error["loc"][-1]
+        tipo = error["type"]
+
+        # Traduce o personaliza el mensaje según el tipo de error de Pydantic
+        if "string_too_short" in tipo or "min_length" in tipo:
+            errores_amigables[campo] = "Este campo es demasiado corto (mínimo 3 caracteres)."
+        elif "missing" in tipo:
+            errores_amigables[campo] = "Este campo es obligatorio."
+        else:
+            errores_amigables[campo] = "Dato inválido."
+
+    return JSONResponse(
+        status_code=422,
+        content={
+            "success": False,
+            "message": "Error de validación en los datos enviados.",
+            "errors": errores_amigables
+        }
+    )
 
 # CORS: se usa la lista explícita de orígenes definida en la configuración
 # (variable de entorno ALLOWED_ORIGINS). En producción, ALLOWED_ORIGINS debe

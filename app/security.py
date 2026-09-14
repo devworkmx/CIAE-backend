@@ -108,8 +108,16 @@ def require_admin(current_user: Usuario = Depends(get_current_user)) -> Usuario:
     Dependencia para proteger operaciones destructivas o sensibles
     (eliminar alumnos/cursos/certificados, cambiar estado de alumnos, etc.).
     Solo usuarios con rol "admin" pueden pasar este check.
+
+    NOTA DE SEGURIDAD (fail-closed): el valor por defecto de getattr() aquí
+    es "capturista" (un rol SIN privilegios), no "admin". Si por cualquier
+    motivo el atributo `rol` no estuviera disponible en el objeto Usuario
+    (por ejemplo, un objeto parcialmente cargado o un error de mapeo), el
+    resultado debe ser NEGAR el acceso, nunca concederlo por accidente.
+    Un default inseguro aquí sería un "fail-open": el sistema fallaría
+    permitiendo justo la acción que se supone debe restringir.
     """
-    if getattr(current_user, "rol", "admin") != "admin":
+    if getattr(current_user, "rol", "capturista") != "admin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Esta acción requiere permisos de administrador",

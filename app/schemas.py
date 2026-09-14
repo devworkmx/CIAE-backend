@@ -173,6 +173,16 @@ class CertificadoCreate(BaseModel):
 
 
 class CertificadoUpdate(BaseModel):
+    # NOTA DE SEGURIDAD: "estatus" se eliminó deliberadamente de este
+    # esquema. El cambio de estatus (revocar/reactivar un certificado)
+    # es una acción sensible que SOLO debe hacerse a través del endpoint
+    # dedicado PATCH /api/certificados/{id}/estatus, protegido con
+    # require_admin (ver certificados.py). Si "estatus" siguiera
+    # disponible aquí, cualquier usuario autenticado (no solo admin)
+    # podría revocar o reactivar certificados usando este endpoint
+    # genérico, evadiendo por completo el control de permisos.
+    # NO reintroducir este campo sin agregar también require_admin
+    # a este endpoint.
     folio_manual: Optional[str] = None
     curso_id: Optional[int] = None
     alumno_id: Optional[int] = None
@@ -181,7 +191,6 @@ class CertificadoUpdate(BaseModel):
     tiene_vigencia: Optional[bool] = None
     fecha_vigencia: Optional[date] = None
     calificacion: Optional[str] = None
-    estatus: Optional[str] = None
 
 
 class CertificadoUpdateEstatus(BaseModel):

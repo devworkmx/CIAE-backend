@@ -1,6 +1,7 @@
 from datetime import date
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
 from app.database import get_db
@@ -91,10 +92,18 @@ def validar_certificado_publico(
 def buscar_certificado_manual(
     request: Request,
     tipo: str = Query(..., regex="^(folio|curp)$", description="Tipo: folio o curp"),
-    valor: str = Query(..., min_length=1, description="Folio manual o CURP"),
+    valor: str = Query(..., min_length=1, max_length=50, description="Folio manual o CURP"),
     db: Session = Depends(get_db),
 ):
-    valor_limpio = valor.strip()
+    # NOTA DE SEGURIDAD: se usa comparación EXACTA (func.upper(...) == ...)
+    # en vez de ilike(). folio_manual y curp son identificadores exactos,
+    # no búsquedas difusas, así que no hay razón funcional para permitir
+    # comodines SQL ("%", "_") en este valor. Antes, al venir directo de
+    # una petición pública sin validación de formato, ilike() permitía
+    # usar este endpoint como oráculo para enumerar CURPs o folios válidos
+    # carácter por carácter (ej. valor="A%", valor="AB%", ...). La CURP es
+    # un identificador sensible y no debe poder inferirse así.
+    valor_limpio = valor.strip().upper()
 
     if tipo == "folio":
         cert = (
@@ -103,14 +112,14 @@ def buscar_certificado_manual(
                 joinedload(Certificado.alumno),
                 joinedload(Certificado.curso),
             )
-            .filter(Certificado.folio_manual.ilike(valor_limpio))
+            .filter(func.upper(Certificado.folio_manual) == valor_limpio)
             .first()
         )
 
         if not cert:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"No se encontró ningún certificado asociado al folio '{valor_limpio}'.",
+                detail="No se encontró ningún certificado asociado al folio proporcionado.",
             )
 
         alumno_resumen = None
@@ -128,17 +137,17 @@ def buscar_certificado_manual(
         )
 
     else:  # tipo == "curp"
-        # 1. Localizar al alumno en el padrón
+        # 1. Localizar al alumno en el padrón (comparación exacta, sin comodines)
         alumno = (
             db.query(Alumno)
-            .filter(Alumno.curp.ilike(valor_limpio))
+            .filter(func.upper(Alumno.curp) == valor_limpio)
             .first()
         )
 
         if not alumno:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"No se encontró ningún alumno registrado con la CURP '{valor_limpio}'.",
+                detail="No se encontró ningún alumno registrado con la CURP proporcionada.",
             )
 
         # 2. Obtener TODOS (.all()) los certificados asociados al alumno ordenados por fecha
