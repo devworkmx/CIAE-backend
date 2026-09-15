@@ -19,7 +19,10 @@ from app.schemas import (
     CertificadoUpdateEstatus,
 )
 from app.security import get_current_user, require_admin
-from app.services.email import enviar_correo_certificado
+from app.services.email import (
+    enviar_correo_certificado,
+    enviar_correo_renovacion_certificado,
+)
 
 router = APIRouter(
     prefix="/api/certificados",
@@ -171,16 +174,18 @@ def crear_certificado(
 @router.post("/{certificado_id}/renovar")
 def renovar_certificado(
     certificado_id: int,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
     """
     Renueva la vigencia de un certificado vencido tomando como base
     los meses_vigencia configurados en el curso correspondiente.
-    Mantiene el mismo token_publico y QR original.
+    Mantiene el mismo token_publico y notifica al alumno por correo.
     """
     cert = (
         db.query(Certificado)
+        .options(joinedload(Certificado.alumno))
         .filter(
             Certificado.id == certificado_id,
             Certificado.tenant_id == current_user.tenant_id,
@@ -219,6 +224,18 @@ def renovar_certificado(
 
     db.commit()
     db.refresh(cert)
+
+    if cert.alumno and cert.alumno.email:
+        background_tasks.add_task(
+            enviar_correo_renovacion_certificado,
+            destinatario=cert.alumno.email,
+            alumno_nombre=f"{cert.alumno.nombre} {cert.alumno.apellidos}",
+            curso_nombre=curso.nombre,
+            folio=cert.folio_manual,
+            token_publico=cert.token_publico,
+            nueva_fecha_vigencia=str(cert.fecha_vigencia),
+            meses_renovados=curso.meses_vigencia,
+        )
 
     return {
         "mensaje": f"Acreditación renovada con éxito por {curso.meses_vigencia} meses.",

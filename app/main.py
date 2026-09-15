@@ -1,6 +1,8 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from slowapi.errors import RateLimitExceeded
 from slowapi import _rate_limit_exceeded_handler
@@ -10,17 +12,25 @@ from app.database import Base, engine
 from app.rate_limit import limiter
 from app.routers import alumnos, auth, certificados, cursos, public
 
-# Crear tablas en PostgreSQL si no existen
-Base.metadata.create_all(bind=engine)
+
+# --- CICLO DE VIDA (Arranque limpio y rápido) ---
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Crear tablas al arrancar la aplicación sin bloquear la importación del módulo
+    Base.metadata.create_all(bind=engine)
+    yield
+
 
 app = FastAPI(
     title="CIAE - Sistema de Certificación y Validación Académica",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
-# Rate limiting global (usado explícitamente en /api/public y /api/auth/login)
+# Rate limiting global
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
 
 # --- MANEJADOR GLOBAL DE ERRORES DE VALIDACIÓN (Pydantic) ---
 @app.exception_handler(RequestValidationError)
@@ -28,11 +38,9 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     errores_amigables = {}
 
     for error in exc.errors():
-        # Obtiene el nombre del campo que falló (ej. 'nombre')
         campo = error["loc"][-1]
         tipo = error["type"]
 
-        # Traduce o personaliza el mensaje según el tipo de error de Pydantic
         if "string_too_short" in tipo or "min_length" in tipo:
             errores_amigables[campo] = "Este campo es demasiado corto (mínimo 3 caracteres)."
         elif "missing" in tipo:
@@ -45,23 +53,28 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         content={
             "success": False,
             "message": "Error de validación en los datos enviados.",
-            "errors": errores_amigables
-        }
+            "errors": errores_amigables,
+        },
     )
 
-# CORS: se usa la lista explícita de orígenes definida en la configuración
-# (variable de entorno ALLOWED_ORIGINS). En producción, ALLOWED_ORIGINS debe
-# apuntar únicamente al/los dominio(s) reales del frontend, nunca a un
-# regex amplio que acepte cualquier IP de red local o cualquier puerto.
+
+# --- MIDDLEWARES DE RENDIMIENTO Y SEGURIDAD ---
+
+# 1. Compresión Gzip para payloads JSON > 1KB (reduce drásticamente el tamaño transferido)
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+# 2. CORS optimizado con caché de preflight (max_age)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
     allow_headers=["*"],
+    max_age=86400,  # El navegador recuerda la autorización OPTIONS por 24 horas
 )
 
-# Encabezados de seguridad básicos
+
+# 3. Encabezados de seguridad básicos
 @app.middleware("http")
 async def agregar_encabezados_seguridad(request: Request, call_next):
     response = await call_next(request)
@@ -71,7 +84,7 @@ async def agregar_encabezados_seguridad(request: Request, call_next):
     return response
 
 
-# Registro de routers
+# --- REGISTRO DE ROUTERS ---
 app.include_router(auth.router)
 app.include_router(cursos.router)
 app.include_router(alumnos.router)
@@ -79,6 +92,10 @@ app.include_router(certificados.router)
 app.include_router(public.router)
 
 
+# --- ENDPOINT DE SALUD (Health Check) ---
 @app.get("/", tags=["salud"])
 def revision_salud():
-    return {"estado": "activo", "servicio": "CIAE Backend API"}
+    return JSONResponse(
+        content={"estado": "activo", "servicio": "CIAE Backend API"},
+        headers={"Cache-Control": "no-store"},
+    )
