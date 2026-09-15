@@ -19,7 +19,10 @@ from app.schemas import (
     CertificadoUpdateEstatus,
 )
 from app.security import get_current_user, require_admin
-from app.services.email import enviar_correo_certificado
+from app.services.email import (
+    enviar_correo_certificado,
+    enviar_correo_renovacion_certificado,
+)
 
 router = APIRouter(
     prefix="/api/certificados",
@@ -166,6 +169,81 @@ def crear_certificado(
         )
 
     return cert
+
+
+@router.post("/{certificado_id}/renovar")
+def renovar_certificado(
+    certificado_id: int,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    """
+    Renueva la vigencia de un certificado vencido tomando como base
+    los meses_vigencia configurados en el curso correspondiente.
+    Mantiene el mismo token_publico y notifica al alumno por correo.
+    """
+    cert = (
+        db.query(Certificado)
+        .options(joinedload(Certificado.alumno))
+        .filter(
+            Certificado.id == certificado_id,
+            Certificado.tenant_id == current_user.tenant_id,
+        )
+        .first()
+    )
+
+    if not cert:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Certificado no encontrado en su institución.",
+        )
+
+    curso = (
+        db.query(Curso)
+        .filter(
+            Curso.id == cert.curso_id,
+            Curso.tenant_id == current_user.tenant_id,
+        )
+        .first()
+    )
+
+    if not curso or not curso.tiene_vigencia or not curso.meses_vigencia or curso.meses_vigencia <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El curso asignado a este certificado no tiene configurada una vigencia en meses válida.",
+        )
+
+    hoy = date.today()
+    nueva_expiracion = hoy + relativedelta(months=curso.meses_vigencia)
+
+    cert.fecha_emision = hoy
+    cert.fecha_vigencia = nueva_expiracion
+    cert.tiene_vigencia = True
+    cert.estatus = "vigente"
+
+    db.commit()
+    db.refresh(cert)
+
+    if cert.alumno and cert.alumno.email:
+        background_tasks.add_task(
+            enviar_correo_renovacion_certificado,
+            destinatario=cert.alumno.email,
+            alumno_nombre=f"{cert.alumno.nombre} {cert.alumno.apellidos}",
+            curso_nombre=curso.nombre,
+            folio=cert.folio_manual,
+            token_publico=cert.token_publico,
+            nueva_fecha_vigencia=str(cert.fecha_vigencia),
+            meses_renovados=curso.meses_vigencia,
+        )
+
+    return {
+        "mensaje": f"Acreditación renovada con éxito por {curso.meses_vigencia} meses.",
+        "nueva_fecha_emision": cert.fecha_emision,
+        "nueva_fecha_vigencia": cert.fecha_vigencia,
+        "meses_aplicados": curso.meses_vigencia,
+        "folio": cert.folio_manual,
+    }
 
 
 @router.patch("/{certificado_id}", response_model=CertificadoOut)
