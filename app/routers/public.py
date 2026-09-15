@@ -45,9 +45,12 @@ def _construir_respuesta_validacion(cert: Certificado) -> ValidacionPublicaRespo
     if not nombre_alumno and cert.alumno:
         nombre_alumno = f"{cert.alumno.nombre} {cert.alumno.apellidos}"
 
+    nombre_institucion = cert.tenant.nombre if cert.tenant else "Institución Oficial"
+
     return ValidacionPublicaResponse(
         valido=documento_valido,
         folio=cert.folio_manual or "",
+        institucion=nombre_institucion,
         alumno_nombre=nombre_alumno or "Sin Nombre",
         curso_nombre=cert.curso.nombre if cert.curso else "N/A",
         duracion_horas=cert.curso.duracion_horas if cert.curso else 0,
@@ -73,6 +76,7 @@ def validar_certificado_publico(
         .options(
             joinedload(Certificado.alumno),
             joinedload(Certificado.curso),
+            joinedload(Certificado.tenant),  # Carga la institución emisora
         )
         .filter(Certificado.token_publico == token)
         .first()
@@ -95,14 +99,6 @@ def buscar_certificado_manual(
     valor: str = Query(..., min_length=1, max_length=50, description="Folio manual o CURP"),
     db: Session = Depends(get_db),
 ):
-    # NOTA DE SEGURIDAD: se usa comparación EXACTA (func.upper(...) == ...)
-    # en vez de ilike(). folio_manual y curp son identificadores exactos,
-    # no búsquedas difusas, así que no hay razón funcional para permitir
-    # comodines SQL ("%", "_") en este valor. Antes, al venir directo de
-    # una petición pública sin validación de formato, ilike() permitía
-    # usar este endpoint como oráculo para enumerar CURPs o folios válidos
-    # carácter por carácter (ej. valor="A%", valor="AB%", ...). La CURP es
-    # un identificador sensible y no debe poder inferirse así.
     valor_limpio = valor.strip().upper()
 
     if tipo == "folio":
@@ -111,6 +107,7 @@ def buscar_certificado_manual(
             .options(
                 joinedload(Certificado.alumno),
                 joinedload(Certificado.curso),
+                joinedload(Certificado.tenant),  # Carga la institución emisora
             )
             .filter(func.upper(Certificado.folio_manual) == valor_limpio)
             .first()
@@ -137,7 +134,6 @@ def buscar_certificado_manual(
         )
 
     else:  # tipo == "curp"
-        # 1. Localizar al alumno en el padrón (comparación exacta, sin comodines)
         alumno = (
             db.query(Alumno)
             .filter(func.upper(Alumno.curp) == valor_limpio)
@@ -150,16 +146,16 @@ def buscar_certificado_manual(
                 detail="No se encontró ningún alumno registrado con la CURP proporcionada.",
             )
 
-        # 2. Obtener TODOS (.all()) los certificados asociados al alumno ordenados por fecha
         certs = (
             db.query(Certificado)
             .options(
                 joinedload(Certificado.alumno),
                 joinedload(Certificado.curso),
+                joinedload(Certificado.tenant),  # Carga la institución emisora
             )
             .filter(Certificado.alumno_id == alumno.id)
             .order_by(Certificado.fecha_emision.desc(), Certificado.id.desc())
-            .all()  # <--- AQUÍ SE OBTIENEN TODOS LOS CERTIFICADOS
+            .all()
         )
 
         if not certs:

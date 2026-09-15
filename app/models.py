@@ -1,29 +1,42 @@
 import secrets
 from datetime import date, datetime
-from sqlalchemy import Boolean, Column, Date, DateTime, ForeignKey, Integer, String
+from sqlalchemy import Boolean, Column, Date, DateTime, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import relationship
 
 from app.database import Base
+
+
+class Tenant(Base):
+    """Representa a cada cliente, institución, escuela o academia."""
+    __tablename__ = "tenants"
+
+    id = Column(Integer, primary_key=True, index=True)
+    nombre = Column(String(150), nullable=False)
+    slug = Column(String(60), unique=True, index=True, nullable=False)
+    activo = Column(Boolean, default=True, nullable=False)
+    creado_en = Column(DateTime, default=datetime.utcnow)
+
+    usuarios = relationship("Usuario", back_populates="tenant", cascade="all, delete-orphan")
+    cursos = relationship("Curso", back_populates="tenant", cascade="all, delete-orphan")
+    alumnos = relationship("Alumno", back_populates="tenant", cascade="all, delete-orphan")
+    certificados = relationship("Certificado", back_populates="tenant", cascade="all, delete-orphan")
 
 
 class Usuario(Base):
     __tablename__ = "usuarios"
 
     id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=False, index=True)
     username = Column(String(50), unique=True, index=True, nullable=False)
     email = Column(String(100), unique=True, index=True, nullable=False)
     password_hash = Column(String(255), nullable=False)
     nombre_completo = Column(String(150), nullable=False)
     activo = Column(Boolean, default=True)
-    # Rol del usuario: "admin" (acceso total, incluye eliminar registros)
-    # o "capturista" (alta/edición pero sin permisos destructivos).
-    # Se agrega con default="admin" para no romper cuentas ya existentes;
-    # si ya tienes usuarios en la base, revísalos y ajusta el rol manualmente
-    # a "capturista" donde corresponda.
     rol = Column(String(20), nullable=False, default="admin")
     creado_en = Column(DateTime, default=datetime.utcnow)
 
-    # Alias de compatibilidad para evitar AttributeError
+    tenant = relationship("Tenant", back_populates="usuarios")
+
     @property
     def hashed_password(self) -> str:
         return self.password_hash
@@ -37,6 +50,7 @@ class Curso(Base):
     __tablename__ = "cursos"
 
     id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=False, index=True)
     nombre = Column(String(200), nullable=False)
     duracion_horas = Column(Integer, nullable=False)
     clave_curso = Column(String(50), nullable=True)
@@ -44,29 +58,40 @@ class Curso(Base):
     meses_vigencia = Column(Integer, nullable=True)
     creado_en = Column(DateTime, default=datetime.utcnow)
 
-    certificados = relationship("Certificado", back_populates="curso")
+    tenant = relationship("Tenant", back_populates="cursos")
+    certificados = relationship("Certificado", back_populates="curso", cascade="all, delete-orphan")
 
 
 class Alumno(Base):
     __tablename__ = "alumnos"
 
     id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=False, index=True)
     nombre = Column(String(100), nullable=False)
     apellidos = Column(String(100), nullable=False)
-    curp = Column(String(18), unique=True, index=True, nullable=False)
+    curp = Column(String(18), nullable=False, index=True)
     email = Column(String(100), nullable=True)
     telefono = Column(String(20), nullable=True)
     activo = Column(Boolean, default=True, nullable=False)
     creado_en = Column(DateTime, default=datetime.utcnow)
 
-    certificados = relationship("Certificado", back_populates="alumno")
+    # Restricción única por institución: dos academias diferentes pueden tener al mismo alumno
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "curp", name="uq_tenant_alumno_curp"),
+    )
+
+    tenant = relationship("Tenant", back_populates="alumnos")
+    certificados = relationship("Certificado", back_populates="alumno", cascade="all, delete-orphan")
 
 
 class Certificado(Base):
     __tablename__ = "certificados"
 
     id = Column(Integer, primary_key=True, index=True)
-    folio_manual = Column(String(50), unique=True, index=True, nullable=False)
+    tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=False, index=True)
+    folio_manual = Column(String(50), nullable=False, index=True)
+
+    # El token público permanece único globalmente para la validación pública por QR
     token_publico = Column(
         String(64),
         unique=True,
@@ -86,6 +111,12 @@ class Certificado(Base):
     estatus = Column(String(20), default="vigente")  # vigente, expirado, revocado
     creado_en = Column(DateTime, default=datetime.utcnow)
 
+    # Restricción única por institución: dos clientes pueden usar folios que comiencen igual (ej. "FOLIO-001")
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "folio_manual", name="uq_tenant_certificado_folio"),
+    )
+
+    tenant = relationship("Tenant", back_populates="certificados")
     curso = relationship("Curso", back_populates="certificados")
     alumno = relationship("Alumno", back_populates="certificados")
 

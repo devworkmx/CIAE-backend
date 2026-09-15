@@ -23,10 +23,6 @@ def login(
 ):
     user = authenticate_user(db, form_data.username, form_data.password)
     if not user:
-        # Mensaje único y genérico a propósito: no distingue entre usuario
-        # inexistente, contraseña incorrecta, o cuenta desactivada. Evita
-        # que alguien que llame a la API directamente (sin pasar por el
-        # frontend) pueda enumerar cuentas válidas o su estado.
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Usuario o contraseña incorrectos",
@@ -38,11 +34,6 @@ def login(
         data={"sub": user.username}, expires_delta=access_token_expires
     )
 
-    # El JWT se entrega como cookie httpOnly: el navegador la guarda y la
-    # reenvía sola en cada petición al backend, pero JavaScript nunca puede
-    # leerla (mitiga robo de sesión por XSS). "secure" exige HTTPS real en
-    # producción; "samesite=lax" evita que se envíe en peticiones de
-    # terceros (mitiga CSRF básico) sin romper la navegación normal.
     response.set_cookie(
         key=settings.COOKIE_NAME,
         value=access_token,
@@ -61,8 +52,7 @@ def login(
 
 @router.post("/logout")
 def logout(response: Response):
-    """Borra la cookie de sesión en el navegador. El backend no necesita
-    invalidar el JWT en sí (expira solo), solo dejar de reenviarlo."""
+    """Borra la cookie de sesión en el navegador."""
     response.delete_cookie(key=settings.COOKIE_NAME, path="/")
     return {"detail": "Sesión cerrada correctamente"}
 
@@ -70,7 +60,24 @@ def logout(response: Response):
 @router.get("/me", response_model=UsuarioActualResponse)
 def obtener_usuario_actual(usuario_actual: Usuario = Depends(get_current_user)):
     """
-    Le permite al frontend confirmar si hay una sesión activa y válida,
-    sin poder leer la cookie httpOnly directamente desde JavaScript.
+    Devuelve los datos del usuario logueado y su tenant asociado.
+    Construye el tenant explícitamente para garantizar que viaje en el JSON.
     """
-    return usuario_actual
+    tenant_dict = None
+    if usuario_actual.tenant:
+        tenant_dict = {
+            "id": usuario_actual.tenant.id,
+            "nombre": usuario_actual.tenant.nombre,
+            "slug": usuario_actual.tenant.slug,
+            "activo": usuario_actual.tenant.activo,
+            "creado_en": usuario_actual.tenant.creado_en,
+        }
+
+    return UsuarioActualResponse(
+        username=usuario_actual.username,
+        nombre_completo=usuario_actual.nombre_completo,
+        email=usuario_actual.email,
+        rol=usuario_actual.rol,
+        tenant_id=usuario_actual.tenant_id,
+        tenant=tenant_dict,
+    )

@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import Curso
+from app.models import Curso, Usuario
 from app.schemas import CursoCreate, CursoOut, CursoUpdate
 from app.security import get_current_user, require_admin
 
@@ -15,21 +15,41 @@ router = APIRouter(
 
 
 @router.get("", response_model=List[CursoOut])
-def listar_cursos(db: Session = Depends(get_db)):
-    return db.query(Curso).order_by(Curso.nombre.asc()).all()
+def listar_cursos(
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    return (
+        db.query(Curso)
+        .filter(Curso.tenant_id == current_user.tenant_id)
+        .order_by(Curso.nombre.asc())
+        .all()
+    )
 
 
 @router.get("/{curso_id}", response_model=CursoOut)
-def obtener_curso(curso_id: int, db: Session = Depends(get_db)):
-    curso = db.query(Curso).filter(Curso.id == curso_id).first()
+def obtener_curso(
+    curso_id: int,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    curso = (
+        db.query(Curso)
+        .filter(Curso.id == curso_id, Curso.tenant_id == current_user.tenant_id)
+        .first()
+    )
     if not curso:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Curso no encontrado")
     return curso
 
 
 @router.post("", response_model=CursoOut, status_code=status.HTTP_201_CREATED)
-def crear_curso(datos: CursoCreate, db: Session = Depends(get_db)):
-    curso = Curso(**datos.model_dump())
+def crear_curso(
+    datos: CursoCreate,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    curso = Curso(**datos.model_dump(), tenant_id=current_user.tenant_id)
     db.add(curso)
     db.commit()
     db.refresh(curso)
@@ -37,8 +57,17 @@ def crear_curso(datos: CursoCreate, db: Session = Depends(get_db)):
 
 
 @router.patch("/{curso_id}", response_model=CursoOut)
-def actualizar_curso(curso_id: int, datos: CursoUpdate, db: Session = Depends(get_db)):
-    curso = db.query(Curso).filter(Curso.id == curso_id).first()
+def actualizar_curso(
+    curso_id: int,
+    datos: CursoUpdate,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    curso = (
+        db.query(Curso)
+        .filter(Curso.id == curso_id, Curso.tenant_id == current_user.tenant_id)
+        .first()
+    )
     if not curso:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Curso no encontrado")
     for key, value in datos.model_dump(exclude_unset=True).items():
@@ -52,9 +81,13 @@ def actualizar_curso(curso_id: int, datos: CursoUpdate, db: Session = Depends(ge
 def eliminar_curso(
     curso_id: int,
     db: Session = Depends(get_db),
-    _admin=Depends(require_admin),
+    current_admin: Usuario = Depends(require_admin),
 ):
-    curso = db.query(Curso).filter(Curso.id == curso_id).first()
+    curso = (
+        db.query(Curso)
+        .filter(Curso.id == curso_id, Curso.tenant_id == current_admin.tenant_id)
+        .first()
+    )
     if not curso:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Curso no encontrado")
     db.delete(curso)

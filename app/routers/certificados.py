@@ -29,20 +29,6 @@ router = APIRouter(
 
 
 def _obtener_url_qr(request: Request, token: str) -> str:
-    """
-    Construye la URL de validación embebida en el QR.
-
-    IMPORTANTE (seguridad): esta URL nunca debe poder ser controlada por
-    quien hace la petición. Un QR que apunte a un dominio arbitrario es un
-    vector de phishing (parece un certificado oficial pero lleva a un sitio
-    malicioso). Por eso:
-      - No se acepta ningún parámetro de la petición (como un antiguo
-        `base_url`) para decidir el dominio de destino.
-      - El encabezado Origin/Referer solo se usa si coincide EXACTAMENTE
-        con uno de los orígenes permitidos en settings.cors_origins.
-      - En cualquier otro caso, se usa siempre el FRONTEND_VALIDATION_URL
-        configurado de forma fija en el servidor.
-    """
     base_url = getattr(
         settings, "FRONTEND_VALIDATION_URL", "http://localhost:5173/validar"
     )
@@ -62,10 +48,15 @@ def listar_certificados(
     curso_id: Optional[int] = None,
     alumno_id: Optional[int] = None,
     db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
 ):
-    query = db.query(Certificado).options(
-        joinedload(Certificado.alumno),
-        joinedload(Certificado.curso),
+    query = (
+        db.query(Certificado)
+        .options(
+            joinedload(Certificado.alumno),
+            joinedload(Certificado.curso),
+        )
+        .filter(Certificado.tenant_id == current_user.tenant_id)
     )
     if curso_id is not None:
         query = query.filter(Certificado.curso_id == curso_id)
@@ -75,14 +66,21 @@ def listar_certificados(
 
 
 @router.get("/{certificado_id}", response_model=CertificadoOut)
-def obtener_certificado(certificado_id: int, db: Session = Depends(get_db)):
+def obtener_certificado(
+    certificado_id: int,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
     cert = (
         db.query(Certificado)
         .options(
             joinedload(Certificado.alumno),
             joinedload(Certificado.curso),
         )
-        .filter(Certificado.id == certificado_id)
+        .filter(
+            Certificado.id == certificado_id,
+            Certificado.tenant_id == current_user.tenant_id,
+        )
         .first()
     )
     if not cert:
@@ -100,26 +98,36 @@ def crear_certificado(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
-    # Validar duplicidad de folio manual
     folio_existente = (
         db.query(Certificado)
-        .filter(Certificado.folio_manual.ilike(datos.folio_manual.strip()))
+        .filter(
+            Certificado.folio_manual.ilike(datos.folio_manual.strip()),
+            Certificado.tenant_id == current_user.tenant_id,
+        )
         .first()
     )
     if folio_existente:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="El folio manual asignado ya existe. Por favor ingrese un folio único.",
+            detail="El folio manual asignado ya existe en su institución.",
         )
 
-    curso = db.query(Curso).filter(Curso.id == datos.curso_id).first()
+    curso = (
+        db.query(Curso)
+        .filter(Curso.id == datos.curso_id, Curso.tenant_id == current_user.tenant_id)
+        .first()
+    )
     if not curso:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="El curso especificado no existe",
         )
 
-    alumno = db.query(Alumno).filter(Alumno.id == datos.alumno_id).first()
+    alumno = (
+        db.query(Alumno)
+        .filter(Alumno.id == datos.alumno_id, Alumno.tenant_id == current_user.tenant_id)
+        .first()
+    )
     if not alumno:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -128,14 +136,13 @@ def crear_certificado(
 
     payload = datos.model_dump()
     payload["folio_manual"] = payload["folio_manual"].strip()
+    payload["tenant_id"] = current_user.tenant_id
 
-    # Manejar fecha de emisión
     fecha_emision = payload.get("fecha_emision")
     if not fecha_emision:
         fecha_emision = date.today()
         payload["fecha_emision"] = fecha_emision
 
-    # Calcular vigencia si no se especifica y el curso la requiere
     if payload.get("tiene_vigencia") and not payload.get("fecha_vigencia"):
         meses = curso.meses_vigencia or 12
         payload["fecha_vigencia"] = fecha_emision + relativedelta(months=meses)
@@ -145,7 +152,6 @@ def crear_certificado(
     db.commit()
     db.refresh(cert)
 
-    # Disparar correo en segundo plano si el alumno cuenta con email registrado
     if alumno.email:
         background_tasks.add_task(
             enviar_correo_certificado,
@@ -167,11 +173,15 @@ def actualizar_certificado(
     certificado_id: int,
     datos: CertificadoUpdate,
     db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
 ):
     cert = (
         db.query(Certificado)
         .options(joinedload(Certificado.alumno), joinedload(Certificado.curso))
-        .filter(Certificado.id == certificado_id)
+        .filter(
+            Certificado.id == certificado_id,
+            Certificado.tenant_id == current_user.tenant_id,
+        )
         .first()
     )
     if not cert:
@@ -188,6 +198,7 @@ def actualizar_certificado(
             db.query(Certificado)
             .filter(
                 Certificado.folio_manual.ilike(folio_limpio),
+                Certificado.tenant_id == current_user.tenant_id,
                 Certificado.id != certificado_id,
             )
             .first()
@@ -195,7 +206,7 @@ def actualizar_certificado(
         if duplicado:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="El folio manual asignado ya está en uso por otro certificado",
+                detail="El folio manual asignado ya está en uso en su institución",
             )
         update_dict["folio_manual"] = folio_limpio
 
@@ -212,12 +223,15 @@ def cambiar_estatus(
     certificado_id: int,
     datos: CertificadoUpdateEstatus,
     db: Session = Depends(get_db),
-    _admin: Usuario = Depends(require_admin),
+    current_admin: Usuario = Depends(require_admin),
 ):
     cert = (
         db.query(Certificado)
         .options(joinedload(Certificado.alumno), joinedload(Certificado.curso))
-        .filter(Certificado.id == certificado_id)
+        .filter(
+            Certificado.id == certificado_id,
+            Certificado.tenant_id == current_admin.tenant_id,
+        )
         .first()
     )
     if not cert:
@@ -236,9 +250,16 @@ def cambiar_estatus(
 def eliminar_certificado(
     certificado_id: int,
     db: Session = Depends(get_db),
-    _admin: Usuario = Depends(require_admin),
+    current_admin: Usuario = Depends(require_admin),
 ):
-    cert = db.query(Certificado).filter(Certificado.id == certificado_id).first()
+    cert = (
+        db.query(Certificado)
+        .filter(
+            Certificado.id == certificado_id,
+            Certificado.tenant_id == current_admin.tenant_id,
+        )
+        .first()
+    )
     if not cert:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -253,11 +274,15 @@ def descargar_qr(
     certificado_id: int,
     request: Request,
     db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
 ):
     cert = (
         db.query(Certificado)
         .options(joinedload(Certificado.alumno))
-        .filter(Certificado.id == certificado_id)
+        .filter(
+            Certificado.id == certificado_id,
+            Certificado.tenant_id == current_user.tenant_id,
+        )
         .first()
     )
     if not cert:

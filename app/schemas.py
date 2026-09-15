@@ -4,8 +4,6 @@ import re
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
 
-# Formato oficial de CURP: 4 letras + 6 dígitos (fecha) + H/M + 5 letras
-# (estado + consonantes internas) + 2 alfanuméricos + 1 dígito verificador.
 CURP_REGEX = re.compile(
     r"^[A-Z][AEIOUX][A-Z]{2}\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])"
     r"[HM](AS|BC|BS|CC|CS|CH|CL|CM|DF|DG|GT|GR|HG|JC|MC|MN|MS|NT|NL|OC|PL|"
@@ -14,7 +12,6 @@ CURP_REGEX = re.compile(
 
 
 def validar_formato_curp(valor: str) -> str:
-    """Normaliza y valida el formato oficial de una CURP. Lanza ValueError si no cumple."""
     valor_normalizado = valor.strip().upper()
     if not CURP_REGEX.match(valor_normalizado):
         raise ValueError(
@@ -24,6 +21,21 @@ def validar_formato_curp(valor: str) -> str:
     return valor_normalizado
 
 
+# ===================== TENANTS =====================
+class TenantBase(BaseModel):
+    nombre: str = Field(..., min_length=2, max_length=150)
+    slug: str = Field(..., min_length=2, max_length=60)
+
+
+class TenantOut(TenantBase):
+    id: int
+    activo: bool
+    creado_en: datetime
+
+    class Config:
+        from_attributes = True
+
+
 # ===================== AUTENTICACIÓN =====================
 class LoginRequest(BaseModel):
     username: str
@@ -31,9 +43,6 @@ class LoginRequest(BaseModel):
 
 
 class LoginResponse(BaseModel):
-    # El JWT ya NO viaja en el cuerpo de la respuesta: el backend lo entrega
-    # como cookie httpOnly (ver /api/auth/login), así JavaScript nunca puede
-    # leerlo directamente. Aquí solo va información no sensible para la UI.
     username: Optional[str] = ""
     nombre_completo: Optional[str] = ""
 
@@ -42,13 +51,9 @@ class UsuarioActualResponse(BaseModel):
     username: str
     nombre_completo: str
     email: EmailStr
-    # Se expone el rol para que el frontend pueda ocultar en la UI acciones
-    # exclusivas de administrador (ej. dar de baja alumnos, revocar
-    # certificados) cuando el usuario es "capturista". OJO: esto es solo
-    # una mejora de experiencia de usuario -- el control de acceso REAL
-    # sigue siendo require_admin en el backend (security.py). Nunca confiar
-    # en este campo del lado del cliente como mecanismo de seguridad.
     rol: str
+    tenant_id: int
+    tenant: Optional[TenantOut] = None
 
     class Config:
         from_attributes = True
@@ -63,6 +68,7 @@ class UsuarioBase(BaseModel):
     email: EmailStr
     nombre_completo: str
     activo: bool = True
+    rol: Optional[str] = "admin"
 
 
 class UsuarioCreate(UsuarioBase):
@@ -82,6 +88,7 @@ class UsuarioCreate(UsuarioBase):
 
 class UsuarioOut(UsuarioBase):
     id: int
+    tenant_id: int
     creado_en: datetime
 
     class Config:
@@ -119,10 +126,6 @@ class CursoOut(CursoBase):
 
 # ===================== ALUMNOS =====================
 class AlumnoBase(BaseModel):
-    # OJO: esta clase también es la base de AlumnoOut (lo que se LEE/lista).
-    # El validador de formato de CURP va solo en AlumnoCreate/AlumnoUpdate
-    # (lo que se ESCRIBE), para no romper la lectura de registros ya
-    # existentes que se hayan guardado antes de agregar esta validación.
     nombre: str = Field(..., min_length=2, max_length=100)
     apellidos: str = Field(..., min_length=2, max_length=100)
     curp: str = Field(..., min_length=18, max_length=18)
@@ -180,16 +183,6 @@ class CertificadoCreate(BaseModel):
 
 
 class CertificadoUpdate(BaseModel):
-    # NOTA DE SEGURIDAD: "estatus" se eliminó deliberadamente de este
-    # esquema. El cambio de estatus (revocar/reactivar un certificado)
-    # es una acción sensible que SOLO debe hacerse a través del endpoint
-    # dedicado PATCH /api/certificados/{id}/estatus, protegido con
-    # require_admin (ver certificados.py). Si "estatus" siguiera
-    # disponible aquí, cualquier usuario autenticado (no solo admin)
-    # podría revocar o reactivar certificados usando este endpoint
-    # genérico, evadiendo por completo el control de permisos.
-    # NO reintroducir este campo sin agregar también require_admin
-    # a este endpoint.
     folio_manual: Optional[str] = None
     curso_id: Optional[int] = None
     alumno_id: Optional[int] = None
@@ -228,6 +221,7 @@ class CertificadoOut(BaseModel):
 class ValidacionPublicaResponse(BaseModel):
     valido: bool
     folio: Optional[str] = None
+    institucion: Optional[str] = None
     alumno_nombre: Optional[str] = None
     curso_nombre: Optional[str] = None
     duracion_horas: Optional[int] = None
