@@ -111,3 +111,70 @@ def enviar_correo_certificado(
         })
     except Exception as e:
         print(f"Error al enviar correo por Resend: {e}")
+
+
+def enviar_correo_contacto(nombre: str, correo: str, mensaje: str):
+    """
+    Envía a la casilla institucional (CONTACTO_EMAIL_DESTINO) el contenido
+    del formulario público de contacto. `correo` se usa como reply_to para
+    que el equipo pueda responder directo al remitente desde su cliente de
+    correo, sin exponer ni depender de que el destinatario final vea la
+    dirección real del visitante en el campo "de".
+    """
+    if not settings.RESEND_API_KEY:
+        print("RESEND_API_KEY no configurada; no se envió el correo de contacto.")
+        return
+
+    # Se escapan nombre y mensaje porque los captura libremente cualquier
+    # visitante del sitio (a diferencia de los datos de certificados, que
+    # captura el administrador autenticado).
+    nombre_seguro = html.escape(nombre or "")
+    mensaje_seguro = html.escape(mensaje or "").replace("\n", "<br>")
+    correo_seguro = html.escape(correo or "")
+
+    html_contenido = f"""
+    <!DOCTYPE html>
+    <html lang="es">
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>Solicitud de Informacion</title>
+    </head>
+    <body style="margin: 0; padding: 0; background-color: #f1f5f9; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #334155;">
+      <table align="center" border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width: 600px; margin: 30px auto; background-color: #ffffff; border-radius: 12px; overflow: hidden; border: 1px solid #e2e8f0; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);">
+        <tr>
+          <td align="center" style="background-color: #1b3a6b; padding: 30px 20px; color: #ffffff;">
+            <h1 style="margin: 0; font-size: 22px; font-weight: 700; letter-spacing: 0.5px;">Solicitud de Informacion</h1>
+            <p style="margin: 6px 0 0; font-size: 13px; color: #e2e8f0; text-transform: uppercase; letter-spacing: 1px;">Sitio web CIAE</p>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding: 30px;">
+            <div style="background-color: #f8fafc; border-left: 4px solid #1b3a6b; padding: 18px; border-radius: 6px; margin-bottom: 24px;">
+              <p style="margin: 0 0 8px; font-size: 14px;"><strong>Nombre:</strong> {nombre_seguro}</p>
+              <p style="margin: 0 0 8px; font-size: 14px;"><strong>Correo:</strong> {correo_seguro}</p>
+            </div>
+            <p style="font-size: 14px; line-height: 1.6; margin: 0 0 8px; color: #475569;"><strong>Mensaje:</strong></p>
+            <p style="font-size: 14px; line-height: 1.6; margin: 0; color: #0f172a;">{mensaje_seguro}</p>
+          </td>
+        </tr>
+        <tr>
+          <td style="background-color: #f8fafc; padding: 20px; text-align: center; border-top: 1px solid #e2e8f0; font-size: 12px; color: #64748b;">
+            Este mensaje se generó automáticamente desde el formulario de contacto del sitio web.
+          </td>
+        </tr>
+      </table>
+    </body>
+    </html>
+    """
+
+    try:
+        resend.Emails.send({
+            "from": settings.RESEND_FROM_EMAIL,
+            "to": settings.CONTACTO_EMAIL_DESTINO,
+            "reply_to": correo,
+            "subject": f"Solicitud de Informacion - {nombre}",
+            "html": html_contenido,
+        })
+    except Exception as e:
+        print(f"Error al enviar correo de contacto por Resend: {e}")

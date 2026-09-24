@@ -21,6 +21,17 @@ def validar_formato_curp(valor: str) -> str:
     return valor_normalizado
 
 
+# ===================== CONTACTO =====================
+class ContactoRequest(BaseModel):
+    nombre: str = Field(..., min_length=3, max_length=150)
+    correo: EmailStr
+    mensaje: str = Field(..., min_length=10, max_length=2000)
+
+
+class ContactoResponse(BaseModel):
+    success: bool = True
+
+
 # ===================== TENANTS =====================
 class TenantBase(BaseModel):
     nombre: str = Field(..., min_length=2, max_length=150)
