@@ -11,6 +11,16 @@ CURP_REGEX = re.compile(
 )
 
 
+def _validar_password(valor: str) -> str:
+    if not re.search(r"[a-z]", valor):
+        raise ValueError("La contraseña debe incluir al menos una letra minúscula")
+    if not re.search(r"[A-Z]", valor):
+        raise ValueError("La contraseña debe incluir al menos una letra mayúscula")
+    if not re.search(r"\d", valor):
+        raise ValueError("La contraseña debe incluir al menos un número")
+    return valor
+
+
 def validar_formato_curp(valor: str) -> str:
     valor_normalizado = valor.strip().upper()
     if not CURP_REGEX.match(valor_normalizado):
@@ -21,18 +31,10 @@ def validar_formato_curp(valor: str) -> str:
     return valor_normalizado
 
 
-# ===================== CONTACTO =====================
-class ContactoRequest(BaseModel):
-    nombre: str = Field(..., min_length=3, max_length=150)
-    correo: EmailStr
-    mensaje: str = Field(..., min_length=10, max_length=2000)
-
-
-class ContactoResponse(BaseModel):
-    success: bool = True
-
-
 # ===================== TENANTS =====================
+ESTADOS_SUSCRIPCION_VALIDOS = {"activo", "suspendido", "cancelado"}
+
+
 class TenantBase(BaseModel):
     nombre: str = Field(..., min_length=2, max_length=150)
     slug: str = Field(..., min_length=2, max_length=60)
@@ -42,9 +44,104 @@ class TenantOut(TenantBase):
     id: int
     activo: bool
     creado_en: datetime
+    estatus_suscripcion: str
+    plan: Optional[str] = None
+    fecha_vencimiento: Optional[date] = None
+    notas_pago: Optional[str] = None
+    puede_emitir_certificados: bool
 
     class Config:
         from_attributes = True
+
+
+# ===================== SUPERADMIN =====================
+class SuperadminTenantCreate(BaseModel):
+    """Alta manual de una institución nueva junto con su primer usuario admin."""
+
+    nombre_institucion: str = Field(..., min_length=2, max_length=150)
+    slug: Optional[str] = Field(None, min_length=2, max_length=60)
+    plan: Optional[str] = Field(None, max_length=50)
+    fecha_vencimiento: Optional[date] = None
+    notas_pago: Optional[str] = None
+
+    username: str = Field(..., min_length=3, max_length=50)
+    email: EmailStr
+    nombre_completo: str = Field(..., min_length=2, max_length=150)
+    password: str = Field(..., min_length=10, max_length=128)
+
+    @field_validator("password")
+    @classmethod
+    def validar_complejidad_password(cls, valor: str) -> str:
+        return _validar_password(valor)
+
+
+class SuperadminUsuarioCreate(BaseModel):
+    """Alta manual de un usuario adicional dentro de un tenant existente."""
+
+    tenant_id: int
+    username: str = Field(..., min_length=3, max_length=50)
+    email: EmailStr
+    nombre_completo: str = Field(..., min_length=2, max_length=150)
+    rol: str = Field("admin", pattern="^(admin|capturista)$")
+    password: str = Field(..., min_length=10, max_length=128)
+
+    @field_validator("password")
+    @classmethod
+    def validar_complejidad_password(cls, valor: str) -> str:
+        return _validar_password(valor)
+
+
+class SuperadminResetPassword(BaseModel):
+    password: str = Field(..., min_length=10, max_length=128)
+
+    @field_validator("password")
+    @classmethod
+    def validar_complejidad_password(cls, valor: str) -> str:
+        return _validar_password(valor)
+
+
+class SuperadminUsuarioEstado(BaseModel):
+    activo: bool
+
+
+class SuperadminTenantSuscripcion(BaseModel):
+    estatus_suscripcion: Optional[str] = None
+    plan: Optional[str] = None
+    fecha_vencimiento: Optional[date] = None
+    notas_pago: Optional[str] = None
+    puede_emitir_certificados: Optional[bool] = None
+    activo: Optional[bool] = None
+
+    @field_validator("estatus_suscripcion")
+    @classmethod
+    def validar_estatus(cls, valor: Optional[str]) -> Optional[str]:
+        if valor is not None and valor not in ESTADOS_SUSCRIPCION_VALIDOS:
+            raise ValueError(
+                f"Estatus inválido. Debe ser uno de: {', '.join(sorted(ESTADOS_SUSCRIPCION_VALIDOS))}"
+            )
+        return valor
+
+
+class SuperadminUsuarioOut(BaseModel):
+    id: int
+    username: str
+    email: EmailStr
+    nombre_completo: str
+    rol: str
+    activo: bool
+    tenant_id: Optional[int] = None
+    creado_en: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class SuperadminTenantOut(TenantOut):
+    total_usuarios: int = 0
+
+
+class SuperadminTenantDetalle(SuperadminTenantOut):
+    usuarios: List[SuperadminUsuarioOut] = []
 
 
 # ===================== AUTENTICACIÓN =====================
@@ -63,7 +160,7 @@ class UsuarioActualResponse(BaseModel):
     nombre_completo: str
     email: EmailStr
     rol: str
-    tenant_id: int
+    tenant_id: Optional[int] = None
     tenant: Optional[TenantOut] = None
 
     class Config:
@@ -88,18 +185,12 @@ class UsuarioCreate(UsuarioBase):
     @field_validator("password")
     @classmethod
     def validar_complejidad_password(cls, valor: str) -> str:
-        if not re.search(r"[a-z]", valor):
-            raise ValueError("La contraseña debe incluir al menos una letra minúscula")
-        if not re.search(r"[A-Z]", valor):
-            raise ValueError("La contraseña debe incluir al menos una letra mayúscula")
-        if not re.search(r"\d", valor):
-            raise ValueError("La contraseña debe incluir al menos un número")
-        return valor
+        return _validar_password(valor)
 
 
 class UsuarioOut(UsuarioBase):
     id: int
-    tenant_id: int
+    tenant_id: Optional[int] = None
     creado_en: datetime
 
     class Config:

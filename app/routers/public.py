@@ -1,6 +1,6 @@
 from datetime import date
 from typing import Optional
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
@@ -10,11 +10,8 @@ from app.rate_limit import limiter
 from app.schemas import (
     AlumnoPublicoResumen,
     BusquedaPublicaResponse,
-    ContactoRequest,
-    ContactoResponse,
     ValidacionPublicaResponse,
 )
-from app.services.email import enviar_correo_contacto
 
 router = APIRouter(prefix="/api/public", tags=["público"])
 
@@ -178,25 +175,3 @@ def buscar_certificado_manual(
             alumno=alumno_resumen,
             certificados=[_construir_respuesta_validacion(c) for c in certs],
         )
-
-
-@router.post("/contacto", response_model=ContactoResponse)
-@limiter.limit("5/minute")
-def enviar_contacto(
-    request: Request,
-    datos: ContactoRequest,
-    background_tasks: BackgroundTasks,
-):
-    """
-    Recibe el formulario público de contacto del sitio y despacha el correo
-    en segundo plano (BackgroundTasks) para no hacer esperar al visitante
-    a que Resend responda. Limitado a 5 solicitudes por minuto por IP para
-    evitar que se use como vector de spam.
-    """
-    background_tasks.add_task(
-        enviar_correo_contacto,
-        nombre=datos.nombre,
-        correo=datos.correo,
-        mensaje=datos.mensaje,
-    )
-    return ContactoResponse(success=True)

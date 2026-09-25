@@ -58,9 +58,6 @@ class Settings(BaseSettings):
     RESEND_FROM_EMAIL: str = "onboarding@resend.dev"
     FRONTEND_URL: str = "http://localhost:5173"  # O el puerto donde corra tu React
 
-    # Correo institucional al que llegan los mensajes del formulario de contacto
-    CONTACTO_EMAIL_DESTINO: str = "contacto@ciae.mx"
-
     # ---- Cookie de sesión (reemplaza el JWT en localStorage) ----
     # COOKIE_SECURE debe ser True en producción (requiere HTTPS real).
     # Solo se pone en False para desarrollo local si el backend corre

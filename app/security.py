@@ -107,11 +107,44 @@ def get_current_user(
 
 def require_admin(current_user: Usuario = Depends(get_current_user)) -> Usuario:
     """
-    Protección para acciones administrativas sensibles.
+    Protección para acciones administrativas sensibles dentro de un tenant.
+    Un superadmin no gestiona cursos/alumnos/certificados de un tenant, así
+    que esta dependencia sigue exigiendo específicamente el rol "admin".
     """
     if getattr(current_user, "rol", "capturista") != "admin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Esta acción requiere permisos de administrador",
+        )
+    return current_user
+
+
+def require_superadmin(current_user: Usuario = Depends(get_current_user)) -> Usuario:
+    """
+    Protección exclusiva para el panel de superadministrador de la plataforma
+    (gestión de tenants, suscripciones y reseteo de contraseñas).
+    """
+    if getattr(current_user, "rol", None) != "superadmin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Esta acción requiere permisos de superadministrador",
+        )
+    return current_user
+
+
+def require_suscripcion_activa(current_user: Usuario = Depends(get_current_user)) -> Usuario:
+    """
+    Bloquea acciones que consumen la suscripción (hoy: emitir certificados)
+    si el tenant fue suspendido/cancelado o si el superadmin le retiró
+    específicamente el permiso de emisión (por ejemplo, mientras confirma un pago).
+    """
+    tenant = current_user.tenant
+    if tenant is None or not tenant.puede_emitir_certificados or tenant.estatus_suscripcion != "activo":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "Su institución no tiene una suscripción activa para emitir "
+                "certificados. Contacte al administrador de la plataforma."
+            ),
         )
     return current_user

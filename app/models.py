@@ -1,9 +1,12 @@
 import secrets
 from datetime import date, datetime
-from sqlalchemy import Boolean, Column, Date, DateTime, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import Boolean, Column, Date, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import relationship
 
 from app.database import Base
+
+# Estados posibles de la suscripción de un tenant (fase 1: manejo manual por el superadmin)
+ESTADOS_SUSCRIPCION = ("activo", "suspendido", "cancelado")
 
 
 class Tenant(Base):
@@ -16,6 +19,16 @@ class Tenant(Base):
     activo = Column(Boolean, default=True, nullable=False)
     creado_en = Column(DateTime, default=datetime.utcnow)
 
+    # ---- Suscripción (gestionada manualmente por el superadmin en fase 1) ----
+    estatus_suscripcion = Column(String(20), default="activo", nullable=False)
+    plan = Column(String(50), nullable=True)
+    fecha_vencimiento = Column(Date, nullable=True)
+    notas_pago = Column(Text, nullable=True)
+    # Permite separar "el tenant existe y puede entrar" de "puede emitir certificados".
+    # Útil hoy para congelar la emisión sin bloquear el acceso, y en fase 2 para
+    # bloquear la emisión a tenants que se auto-registren sin haber pagado aún.
+    puede_emitir_certificados = Column(Boolean, default=True, nullable=False)
+
     usuarios = relationship("Usuario", back_populates="tenant", cascade="all, delete-orphan")
     cursos = relationship("Curso", back_populates="tenant", cascade="all, delete-orphan")
     alumnos = relationship("Alumno", back_populates="tenant", cascade="all, delete-orphan")
@@ -26,7 +39,8 @@ class Usuario(Base):
     __tablename__ = "usuarios"
 
     id = Column(Integer, primary_key=True, index=True)
-    tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=False, index=True)
+    # Nullable porque el superadmin de la plataforma no pertenece a ningún tenant.
+    tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=True, index=True)
     username = Column(String(50), unique=True, index=True, nullable=False)
     email = Column(String(100), unique=True, index=True, nullable=False)
     password_hash = Column(String(255), nullable=False)

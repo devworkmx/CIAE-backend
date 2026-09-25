@@ -71,6 +71,11 @@ def obtener_usuario_actual(usuario_actual: Usuario = Depends(get_current_user)):
             "slug": usuario_actual.tenant.slug,
             "activo": usuario_actual.tenant.activo,
             "creado_en": usuario_actual.tenant.creado_en,
+            "estatus_suscripcion": usuario_actual.tenant.estatus_suscripcion,
+            "plan": usuario_actual.tenant.plan,
+            "fecha_vencimiento": usuario_actual.tenant.fecha_vencimiento,
+            "notas_pago": usuario_actual.tenant.notas_pago,
+            "puede_emitir_certificados": usuario_actual.tenant.puede_emitir_certificados,
         }
 
     return UsuarioActualResponse(
