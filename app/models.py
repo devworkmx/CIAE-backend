@@ -1,9 +1,11 @@
 import secrets
 from datetime import date, datetime
+from typing import Optional
 from sqlalchemy import Boolean, Column, Date, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import relationship
 
 from app.database import Base
+from app.subscription import calcular_estado_acceso, dias_restantes as _dias_restantes
 
 # Estados posibles de la suscripción de un tenant (fase 1: manejo manual por el superadmin)
 ESTADOS_SUSCRIPCION = ("activo", "suspendido", "cancelado")
@@ -33,6 +35,16 @@ class Tenant(Base):
     cursos = relationship("Curso", back_populates="tenant", cascade="all, delete-orphan")
     alumnos = relationship("Alumno", back_populates="tenant", cascade="all, delete-orphan")
     certificados = relationship("Certificado", back_populates="tenant", cascade="all, delete-orphan")
+
+    @property
+    def estado_acceso(self) -> str:
+        """Estado de acceso EFECTIVO (activo/congelado/suspendido). Ver app/subscription.py."""
+        return calcular_estado_acceso(self)
+
+    @property
+    def dias_restantes(self) -> Optional[int]:
+        """Días para que venza el tiempo pagado (negativo si ya venció)."""
+        return _dias_restantes(self)
 
 
 class Usuario(Base):

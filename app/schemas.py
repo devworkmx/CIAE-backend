@@ -49,6 +49,11 @@ class TenantOut(TenantBase):
     fecha_vencimiento: Optional[date] = None
     notas_pago: Optional[str] = None
     puede_emitir_certificados: bool
+    # Estado EFECTIVO de acceso ("activo" | "congelado" | "suspendido"),
+    # ya combina estatus_suscripcion + fecha_vencimiento. El frontend debe
+    # confiar en este campo en vez de recalcular la lógica de vigencia.
+    estado_acceso: str
+    dias_restantes: Optional[int] = None
 
     class Config:
         from_attributes = True
@@ -102,6 +107,19 @@ class SuperadminResetPassword(BaseModel):
 
 class SuperadminUsuarioEstado(BaseModel):
     activo: bool
+
+
+class SuperadminTenantRenovacion(BaseModel):
+    """
+    Renovación rápida: en vez de que el superadmin calcule a mano la nueva
+    fecha de vencimiento, indica cuántos meses pagó el cliente y el backend
+    hace la suma correcta (si aún le quedaba tiempo, se lo respeta y suma
+    encima; si ya estaba vencido, cuenta a partir de hoy).
+    """
+
+    meses: int = Field(..., gt=0, le=36)
+    plan: Optional[str] = Field(None, max_length=50)
+    nota_pago: Optional[str] = Field(None, max_length=500)
 
 
 class SuperadminTenantSuscripcion(BaseModel):

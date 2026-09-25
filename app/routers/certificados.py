@@ -18,7 +18,7 @@ from app.schemas import (
     CertificadoUpdate,
     CertificadoUpdateEstatus,
 )
-from app.security import get_current_user, require_admin, require_suscripcion_activa
+from app.security import get_current_user, require_admin_activo, require_suscripcion_activa
 from app.services.email import (
     enviar_correo_certificado,
     enviar_correo_renovacion_certificado,
@@ -251,7 +251,7 @@ def actualizar_certificado(
     certificado_id: int,
     datos: CertificadoUpdate,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_current_user),
+    current_user: Usuario = Depends(require_suscripcion_activa),
 ):
     cert = (
         db.query(Certificado)
@@ -301,7 +301,7 @@ def cambiar_estatus(
     certificado_id: int,
     datos: CertificadoUpdateEstatus,
     db: Session = Depends(get_db),
-    current_admin: Usuario = Depends(require_admin),
+    current_admin: Usuario = Depends(require_admin_activo),
 ):
     cert = (
         db.query(Certificado)
@@ -328,7 +328,7 @@ def cambiar_estatus(
 def eliminar_certificado(
     certificado_id: int,
     db: Session = Depends(get_db),
-    current_admin: Usuario = Depends(require_admin),
+    current_admin: Usuario = Depends(require_admin_activo),
 ):
     cert = (
         db.query(Certificado)

@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.config import settings
 from app.database import get_db
 from app.models import Usuario
+from app.subscription import ESTADO_ACTIVO, calcular_estado_acceso, mensaje_para_estado
 
 # Configuración de hashing con bcrypt
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -132,19 +133,43 @@ def require_superadmin(current_user: Usuario = Depends(get_current_user)) -> Usu
     return current_user
 
 
-def require_suscripcion_activa(current_user: Usuario = Depends(get_current_user)) -> Usuario:
+def _verificar_tenant_con_acceso_completo(tenant) -> None:
     """
-    Bloquea acciones que consumen la suscripción (hoy: emitir certificados)
-    si el tenant fue suspendido/cancelado o si el superadmin le retiró
-    específicamente el permiso de emisión (por ejemplo, mientras confirma un pago).
+    Punto único de verificación de "¿este tenant puede escribir datos ahora?".
+    Combina el estatus manual que fija el superadmin con la vigencia pagada
+    (ver app/subscription.py). Se usa en TODAS las rutas que crean, editan,
+    eliminan o emiten algo, para que un tenant congelado o suspendido pueda
+    seguir consultando su información (GET) pero nunca modificarla.
     """
-    tenant = current_user.tenant
-    if tenant is None or not tenant.puede_emitir_certificados or tenant.estatus_suscripcion != "activo":
+    estado = calcular_estado_acceso(tenant)
+    if estado != ESTADO_ACTIVO or (tenant is not None and not tenant.puede_emitir_certificados):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=(
-                "Su institución no tiene una suscripción activa para emitir "
-                "certificados. Contacte al administrador de la plataforma."
-            ),
+            detail={
+                "code": "SUSCRIPCION_INACTIVA",
+                "estado": estado,
+                "mensaje": mensaje_para_estado(estado)
+                or (
+                    "Su institución no tiene una suscripción activa para "
+                    "realizar esta acción. Contacte al administrador de la "
+                    "plataforma para renovar su licencia."
+                ),
+            },
         )
+
+
+def require_suscripcion_activa(current_user: Usuario = Depends(get_current_user)) -> Usuario:
+    """
+    Protección de escritura para cualquier usuario autenticado (admin o
+    capturista) cuyo tenant esté congelado/suspendido/sin permiso de emisión.
+    Las lecturas (GET) nunca pasan por aquí: un tenant congelado siempre
+    puede seguir viendo todo su historial.
+    """
+    _verificar_tenant_con_acceso_completo(current_user.tenant)
     return current_user
+
+
+def require_admin_activo(current_admin: Usuario = Depends(require_admin)) -> Usuario:
+    """Igual que require_suscripcion_activa, pero además exige rol admin."""
+    _verificar_tenant_con_acceso_completo(current_admin.tenant)
+    return current_admin

@@ -1,6 +1,8 @@
 import re
+from datetime import date
 from typing import List, Optional
 
+from dateutil.relativedelta import relativedelta
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -12,12 +14,14 @@ from app.schemas import (
     SuperadminTenantCreate,
     SuperadminTenantDetalle,
     SuperadminTenantOut,
+    SuperadminTenantRenovacion,
     SuperadminTenantSuscripcion,
     SuperadminUsuarioCreate,
     SuperadminUsuarioEstado,
     SuperadminUsuarioOut,
 )
 from app.security import hash_password, require_superadmin
+from app.subscription import DURACIONES_SUGERIDAS_MESES, PLANES_SUGERIDOS
 
 router = APIRouter(
     prefix="/api/superadmin",
@@ -156,6 +160,56 @@ def actualizar_suscripcion(
     resultado = SuperadminTenantOut.model_validate(tenant)
     resultado.total_usuarios = total_usuarios
     return resultado
+
+
+@router.post("/tenants/{tenant_id}/renovar", response_model=SuperadminTenantOut)
+def renovar_suscripcion(
+    tenant_id: int,
+    datos: SuperadminTenantRenovacion,
+    db: Session = Depends(get_db),
+):
+    """
+    Renovación rápida tras confirmar un pago: suma los meses pagados a la
+    fecha de vencimiento (respetando el tiempo que le quedaba, si aún tenía),
+    reactiva el estatus y restaura el permiso de emisión. Pensado para el
+    flujo real: el cliente te transfiere, tú entras aquí y le das clic a
+    "renovar" en vez de editar la fecha a mano.
+    """
+    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    if not tenant:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Institución no encontrada")
+
+    hoy = date.today()
+    base = tenant.fecha_vencimiento if (tenant.fecha_vencimiento and tenant.fecha_vencimiento > hoy) else hoy
+    nueva_fecha = base + relativedelta(months=datos.meses)
+
+    tenant.fecha_vencimiento = nueva_fecha
+    tenant.estatus_suscripcion = "activo"
+    tenant.puede_emitir_certificados = True
+    if datos.plan:
+        tenant.plan = datos.plan
+
+    nota = f"Renovado {datos.meses} mes(es) el {hoy.isoformat()}, nueva vigencia {nueva_fecha.isoformat()}."
+    if datos.nota_pago:
+        nota += f" {datos.nota_pago}"
+    tenant.notas_pago = f"{tenant.notas_pago}\n{nota}" if tenant.notas_pago else nota
+
+    db.commit()
+    db.refresh(tenant)
+
+    total_usuarios = db.query(func.count(Usuario.id)).filter(Usuario.tenant_id == tenant_id).scalar() or 0
+    resultado = SuperadminTenantOut.model_validate(tenant)
+    resultado.total_usuarios = total_usuarios
+    return resultado
+
+
+@router.get("/planes")
+def listar_planes_sugeridos():
+    """Catálogo de referencia para los formularios (alta/renovación) del panel."""
+    return {
+        "planes": PLANES_SUGERIDOS,
+        "duraciones_meses": DURACIONES_SUGERIDAS_MESES,
+    }
 
 
 # ===================== USUARIOS =====================

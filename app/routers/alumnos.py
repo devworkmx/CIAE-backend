@@ -10,7 +10,7 @@ from app.schemas import (
     AlumnoUpdate,
     AlumnoToggleEstadoRequest,
 )
-from app.security import get_current_user, require_admin, verify_password
+from app.security import get_current_user, require_admin_activo, require_suscripcion_activa, verify_password
 
 router = APIRouter(
     prefix="/api/alumnos",
@@ -54,7 +54,7 @@ def obtener_alumno(
 def crear_alumno(
     datos: AlumnoCreate,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_current_user),
+    current_user: Usuario = Depends(require_suscripcion_activa),
 ):
     existente = (
         db.query(Alumno)
@@ -85,7 +85,7 @@ def actualizar_alumno(
     alumno_id: int,
     datos: AlumnoUpdate,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_current_user),
+    current_user: Usuario = Depends(require_suscripcion_activa),
 ):
     alumno = (
         db.query(Alumno)
@@ -126,7 +126,7 @@ def actualizar_alumno(
 def cambiar_estado_alumno(
     alumno_id: int,
     payload: AlumnoToggleEstadoRequest,
-    current_admin: Usuario = Depends(require_admin),
+    current_admin: Usuario = Depends(require_admin_activo),
     db: Session = Depends(get_db),
 ):
     if not verify_password(payload.admin_password, current_admin.password_hash):
@@ -155,7 +155,7 @@ def cambiar_estado_alumno(
 def eliminar_alumno(
     alumno_id: int,
     db: Session = Depends(get_db),
-    current_admin: Usuario = Depends(require_admin),
+    current_admin: Usuario = Depends(require_admin_activo),
 ):
     alumno = (
         db.query(Alumno)

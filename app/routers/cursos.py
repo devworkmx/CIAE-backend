@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import Curso, Usuario
 from app.schemas import CursoCreate, CursoOut, CursoUpdate
-from app.security import get_current_user, require_admin
+from app.security import get_current_user, require_admin_activo, require_suscripcion_activa
 
 router = APIRouter(
     prefix="/api/cursos",
@@ -47,7 +47,7 @@ def obtener_curso(
 def crear_curso(
     datos: CursoCreate,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_current_user),
+    current_user: Usuario = Depends(require_suscripcion_activa),
 ):
     curso = Curso(**datos.model_dump(), tenant_id=current_user.tenant_id)
     db.add(curso)
@@ -61,7 +61,7 @@ def actualizar_curso(
     curso_id: int,
     datos: CursoUpdate,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_current_user),
+    current_user: Usuario = Depends(require_suscripcion_activa),
 ):
     curso = (
         db.query(Curso)
@@ -81,7 +81,7 @@ def actualizar_curso(
 def eliminar_curso(
     curso_id: int,
     db: Session = Depends(get_db),
-    current_admin: Usuario = Depends(require_admin),
+    current_admin: Usuario = Depends(require_admin_activo),
 ):
     curso = (
         db.query(Curso)

@@ -76,6 +76,11 @@ def obtener_usuario_actual(usuario_actual: Usuario = Depends(get_current_user)):
             "fecha_vencimiento": usuario_actual.tenant.fecha_vencimiento,
             "notas_pago": usuario_actual.tenant.notas_pago,
             "puede_emitir_certificados": usuario_actual.tenant.puede_emitir_certificados,
+            # Estado efectivo (activo/congelado/suspendido) + días restantes:
+            # el frontend del panel admin usa esto para mostrar el plan/
+            # vigencia y para congelar la UI sin tener que recalcular fechas.
+            "estado_acceso": usuario_actual.tenant.estado_acceso,
+            "dias_restantes": usuario_actual.tenant.dias_restantes,
         }
 
     return UsuarioActualResponse(
